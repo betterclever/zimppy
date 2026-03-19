@@ -1,5 +1,7 @@
 pub mod replay;
 pub mod rpc;
+#[cfg(feature = "shielded")]
+pub mod shielded;
 pub mod transparent;
 
 pub use replay::ConsumedTxids;
