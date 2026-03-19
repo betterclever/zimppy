@@ -4,7 +4,6 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { McpClient } from 'mppx/mcp-sdk/client'
 import { zcashClient } from 'zimppy-ts'
-import { FifoTransport } from './fifo-transport.js'
 import { SocketTransport } from './socket-transport.js'
 import { createLogger, sendRealPayment } from './autopay.js'
 
@@ -107,8 +106,8 @@ async function runTool(
 }
 
 function createTransport() {
-  if (process.env.MCP_READ_PIPE && process.env.MCP_WRITE_PIPE) {
-    return new FifoTransport(process.env.MCP_READ_PIPE, process.env.MCP_WRITE_PIPE)
+  if (false) { // removed FIFO path
+    throw new Error("unreachable")
   }
 
   if (process.env.MCP_SOCKET_PORT) {

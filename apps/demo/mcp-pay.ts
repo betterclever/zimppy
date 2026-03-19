@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { McpClient } from 'mppx/mcp-sdk/client'
 import { zcashClient } from 'zimppy-ts'
-import { FifoTransport } from './fifo-transport.js'
+import { SocketTransport } from './socket-transport.js'
 import { createLogger, sendRealPayment } from './autopay.js'
 
 const log = createLogger()
@@ -47,8 +47,8 @@ async function main(): Promise<void> {
 }
 
 function createTransport() {
-  if (process.env.MCP_READ_PIPE && process.env.MCP_WRITE_PIPE) {
-    return new FifoTransport(process.env.MCP_READ_PIPE, process.env.MCP_WRITE_PIPE)
+  if (process.env.MCP_SOCKET_PORT) {
+    return SocketTransport.connect(Number(process.env.MCP_SOCKET_PORT), process.env.MCP_SOCKET_HOST ?? "127.0.0.1")
   }
 
   const transport = new StdioClientTransport({
