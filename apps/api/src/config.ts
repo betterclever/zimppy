@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,7 +43,31 @@ export type ApiRuntimeConfig = {
   stateDirectory: string;
 };
 
-const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+function resolveRepoRoot(fromImportMetaUrl: string): string {
+  let currentDirectory = path.dirname(fileURLToPath(fromImportMetaUrl));
+
+  while (true) {
+    const hasLocalAppConfig = existsSync(path.join(currentDirectory, "config/local-app.json"));
+    const hasRemoteChainConfig = existsSync(
+      path.join(currentDirectory, "config/remote-chain-service.json"),
+    );
+
+    if (hasLocalAppConfig && hasRemoteChainConfig) {
+      return currentDirectory;
+    }
+
+    const parentDirectory = path.dirname(currentDirectory);
+    if (parentDirectory === currentDirectory) {
+      throw new Error(
+        `Unable to resolve repo root from ${fromImportMetaUrl}: missing split runtime config files`,
+      );
+    }
+
+    currentDirectory = parentDirectory;
+  }
+}
+
+const repoRoot = resolveRepoRoot(import.meta.url);
 
 function readJsonFile<T>(relativePath: string): T {
   const filePath = path.join(repoRoot, relativePath);
