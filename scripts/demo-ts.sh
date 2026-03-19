@@ -19,6 +19,8 @@ tmux split-window -h -t mpp-demo-ts:0.0
 tmux send-keys -t mpp-demo-ts:0.1 "cd /Users/betterclever/newprojects/experiments/zimppy && echo '=== ZIMPPY TS HTTP SERVER ===' && PRICE_ZAT=42000 PORT=3180 npx tsx apps/ts-server/src/server.ts" Enter
 tmux split-window -v -t mpp-demo-ts:0.1
 tmux send-keys -t mpp-demo-ts:0.2 "cd /Users/betterclever/newprojects/experiments/zimppy && bash scripts/live-e2e.sh" Enter
+tmux split-window -v -t mpp-demo-ts:0.0
+tmux send-keys -t mpp-demo-ts:0.3 "cd /Users/betterclever/newprojects/experiments/zimppy && npx tsx apps/demo/block-progress.ts" Enter
 
 tmux select-layout -t mpp-demo-ts tiled
 tmux attach -t mpp-demo-ts
