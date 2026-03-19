@@ -1,6 +1,6 @@
-//! Shielded (Sapling) payment verification.
+//! Shielded (Orchard) payment verification.
 //!
-//! Decrypts Sapling outputs using an Incoming Viewing Key (IVK) and checks
+//! Decrypts Orchard actions using an Incoming Viewing Key (IVK) and checks
 //! that the payment amount and memo match expected values.
 //!
 //! Requires the `shielded` feature flag.
@@ -9,8 +9,7 @@
 
 use std::fmt;
 
-use sapling_crypto::keys::{PreparedIncomingViewingKey, SaplingIvk};
-use sapling_crypto::note_encryption::{try_sapling_note_decryption, Zip212Enforcement};
+use orchard::keys::IncomingViewingKey;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::consensus::BranchId;
 
@@ -23,8 +22,8 @@ const MEMO_PREFIX: &str = "zimppy:";
 #[derive(Debug, Clone)]
 pub struct ShieldedVerifyRequest {
     pub txid: String,
-    /// Sapling Incoming Viewing Key (raw 32 bytes, hex-encoded)
-    pub ivk_hex: String,
+    /// Orchard Incoming Viewing Key (serialized bytes, hex-encoded)
+    pub ivk_bytes_hex: String,
     /// Expected challenge ID in the memo field
     pub expected_challenge_id: String,
     /// Expected payment amount in zatoshis
@@ -41,7 +40,12 @@ pub struct ShieldedVerifyResult {
     pub outputs_decrypted: u32,
 }
 
-/// Verify a shielded Sapling payment by decrypting outputs with a viewing key.
+/// Verify a shielded Orchard payment by decrypting actions with a viewing key.
+///
+/// The server holds an Orchard IVK which lets it see incoming payments
+/// without being able to spend them. For each Orchard action in the tx,
+/// we try to decrypt it. If decryption succeeds, the action was sent to us.
+/// We then check the amount and memo match the expected values.
 pub async fn verify_shielded(
     rpc: &ZebradRpc,
     req: &ShieldedVerifyRequest,
@@ -63,44 +67,34 @@ pub async fn verify_shielded(
     let raw_bytes =
         hex::decode(&raw_hex).map_err(|e| ShieldedVerifyError::ParseError(e.to_string()))?;
 
-    // Parse transaction (try Nu5 branch first, as testnet uses v5 txs)
+    // Parse transaction (Nu5 for Orchard support)
     let tx = Transaction::read(&raw_bytes[..], BranchId::Nu5)
         .map_err(|e| ShieldedVerifyError::ParseError(format!("failed to parse transaction: {e}")))?;
 
-    // Parse the IVK (raw 32 bytes → jubjub::Fr → SaplingIvk → PreparedIncomingViewingKey)
-    let ivk_bytes =
-        hex::decode(&req.ivk_hex).map_err(|e| ShieldedVerifyError::InvalidKey(e.to_string()))?;
+    // Parse the IVK
+    let ivk_bytes = hex::decode(&req.ivk_bytes_hex)
+        .map_err(|e| ShieldedVerifyError::InvalidKey(e.to_string()))?;
 
-    if ivk_bytes.len() != 32 {
-        return Err(ShieldedVerifyError::InvalidKey(format!(
-            "IVK must be 32 bytes, got {}",
-            ivk_bytes.len()
-        )));
-    }
+    let ivk_array: [u8; 64] = ivk_bytes.try_into().map_err(|_| {
+        ShieldedVerifyError::InvalidKey("Orchard IVK must be exactly 64 bytes".to_string())
+    })?;
 
-    let ivk_array: [u8; 32] = ivk_bytes
-        .try_into()
-        .map_err(|_| ShieldedVerifyError::InvalidKey("IVK must be exactly 32 bytes".to_string()))?;
+    let ivk = IncomingViewingKey::from_bytes(&ivk_array)
+        .into_option()
+        .ok_or_else(|| ShieldedVerifyError::InvalidKey(
+            "bytes do not represent a valid Orchard incoming viewing key".to_string(),
+        ))?;
 
-    let fr = jubjub::Fr::from_bytes(&ivk_array);
-    if fr.is_none().into() {
-        return Err(ShieldedVerifyError::InvalidKey(
-            "IVK bytes do not represent a valid jubjub scalar".to_string(),
-        ));
-    }
-    let ivk = SaplingIvk(fr.unwrap());
-    let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
-
-    // Get Sapling bundle
-    let sapling_bundle = tx
-        .sapling_bundle()
-        .ok_or_else(|| ShieldedVerifyError::NoSaplingOutputs {
+    // Get Orchard bundle
+    let orchard_bundle = tx
+        .orchard_bundle()
+        .ok_or_else(|| ShieldedVerifyError::NoOrchardActions {
             txid: req.txid.clone(),
         })?;
 
-    let outputs = sapling_bundle.shielded_outputs();
-    if outputs.is_empty() {
-        return Err(ShieldedVerifyError::NoSaplingOutputs {
+    let action_count = orchard_bundle.actions().len();
+    if action_count == 0 {
+        return Err(ShieldedVerifyError::NoOrchardActions {
             txid: req.txid.clone(),
         });
     }
@@ -109,10 +103,10 @@ pub async fn verify_shielded(
     let mut best_amount: u64 = 0;
     let mut memo_matched = false;
 
-    // Try to decrypt each Sapling output using the sapling-specific helper
-    for output in outputs {
-        if let Some((note, _recipient, memo)) =
-            try_sapling_note_decryption(&prepared_ivk, output, Zip212Enforcement::On)
+    // Try to decrypt each Orchard action
+    for idx in 0..action_count {
+        if let Some((note, _address, memo)) =
+            orchard_bundle.decrypt_output_with_key(idx, &ivk)
         {
             outputs_decrypted += 1;
             let value = note.value().inner();
@@ -121,7 +115,7 @@ pub async fn verify_shielded(
                 best_amount = value;
             }
 
-            // Check memo for our challenge ID — D::Memo is [u8; 512]
+            // Check memo for our challenge ID
             if let Ok(memo_str) = std::str::from_utf8(&memo) {
                 let trimmed = memo_str.trim_end_matches('\0');
                 if let Some(payload) = trimmed.strip_prefix(MEMO_PREFIX) {
@@ -155,7 +149,7 @@ pub enum ShieldedVerifyError {
     ReplayDetected { txid: String },
     ParseError(String),
     InvalidKey(String),
-    NoSaplingOutputs { txid: String },
+    NoOrchardActions { txid: String },
 }
 
 impl fmt::Display for ShieldedVerifyError {
@@ -167,8 +161,8 @@ impl fmt::Display for ShieldedVerifyError {
             }
             Self::ParseError(e) => write!(f, "parse error: {e}"),
             Self::InvalidKey(e) => write!(f, "invalid viewing key: {e}"),
-            Self::NoSaplingOutputs { txid } => {
-                write!(f, "transaction {txid} has no Sapling outputs")
+            Self::NoOrchardActions { txid } => {
+                write!(f, "transaction {txid} has no Orchard actions")
             }
         }
     }
@@ -182,10 +176,10 @@ mod tests {
 
     #[test]
     fn shielded_verify_error_displays() {
-        let err = ShieldedVerifyError::NoSaplingOutputs {
+        let err = ShieldedVerifyError::NoOrchardActions {
             txid: "abc".to_string(),
         };
-        assert!(err.to_string().contains("no Sapling outputs"));
+        assert!(err.to_string().contains("no Orchard actions"));
     }
 
     #[test]
@@ -203,8 +197,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_ivk_length() {
-        let err = ShieldedVerifyError::InvalidKey("IVK must be 32 bytes, got 16".to_string());
-        assert!(err.to_string().contains("32 bytes"));
+    fn rejects_invalid_ivk() {
+        let err = ShieldedVerifyError::InvalidKey("bad key".to_string());
+        assert!(err.to_string().contains("invalid viewing key"));
     }
 }
