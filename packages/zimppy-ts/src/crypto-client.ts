@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+
 export interface VerifyTransparentRequest {
   txid: string
   outputIndex: number
@@ -13,9 +17,25 @@ export interface VerifyResult {
   confirmations: number
 }
 
+export interface VerifyShieldedRequest {
+  txid: string
+  orchardIvk: string
+  expectedChallengeId: string
+  expectedAmountZat: string
+}
+
+export interface ShieldedVerifyResult {
+  verified: boolean
+  txid: string
+  observedAmountZat: string
+  memoMatched: boolean
+  outputsDecrypted: number
+}
+
 /** Interface for crypto verification backends. */
 export interface CryptoBackend {
   verifyTransparent(req: VerifyTransparentRequest): Promise<VerifyResult>
+  verifyShielded(req: VerifyShieldedRequest): Promise<ShieldedVerifyResult>
 }
 
 /**
@@ -45,6 +65,22 @@ export class NapiCryptoClient implements CryptoBackend {
       observedAddress: result.observedAddress,
       observedAmountZat: result.observedAmountZat,
       confirmations: result.confirmations,
+    }
+  }
+
+  async verifyShielded(req: VerifyShieldedRequest): Promise<ShieldedVerifyResult> {
+    const result = await this.core.verifyShielded(
+      req.txid,
+      req.orchardIvk,
+      req.expectedChallengeId,
+      req.expectedAmountZat,
+    )
+    return {
+      verified: result.verified,
+      txid: result.txid,
+      observedAmountZat: result.observedAmountZat,
+      memoMatched: result.memoMatched,
+      outputsDecrypted: result.outputsDecrypted,
     }
   }
 }
@@ -83,6 +119,10 @@ export class HttpCryptoClient implements CryptoBackend {
       observedAmountZat: String(data.observed_amount_zat ?? data.observedAmountZat),
       confirmations: (data.confirmations ?? 0) as number,
     }
+  }
+
+  async verifyShielded(_req: VerifyShieldedRequest): Promise<ShieldedVerifyResult> {
+    throw new Error('shielded verification is only supported through NAPI')
   }
 }
 

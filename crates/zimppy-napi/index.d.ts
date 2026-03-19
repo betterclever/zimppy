@@ -6,6 +6,14 @@ export interface NapiVerifyResult {
   confirmations: number
 }
 
+export interface NapiShieldedVerifyResult {
+  verified: boolean
+  txid: string
+  observedAmountZat: string
+  memoMatched: boolean
+  outputsDecrypted: number
+}
+
 export declare class ZimppyCore {
   constructor(rpcEndpoint: string)
   verifyTransparent(
@@ -14,5 +22,11 @@ export declare class ZimppyCore {
     expectedAddress: string,
     expectedAmountZat: string,
   ): Promise<NapiVerifyResult>
+  verifyShielded(
+    txid: string,
+    orchardIvk: string,
+    expectedChallengeId: string,
+    expectedAmountZat: string,
+  ): Promise<NapiShieldedVerifyResult>
   health(): Promise<string>
 }

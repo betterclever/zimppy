@@ -248,13 +248,10 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
                     "status": "success",
                     "method": "zcash",
                     "reference": outcome.txid,
-                    "amount": outcome.observed_amount_zat,
-                    "challengeId": challenge_id,
-                    "timestamp": std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
                 });
+                let encoded_receipt =
+                    base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
 
                 let fortune = pick_fortune();
                 eprintln!("[200] Payment verified! Serving fortune.");
@@ -262,7 +259,7 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
 
                 (
                     StatusCode::OK,
-                    [("payment-receipt", serde_json::to_string(&receipt).unwrap_or_default())],
+                    [("payment-receipt", encoded_receipt)],
                     Json(serde_json::json!({ "fortune": fortune })),
                 )
                     .into_response()

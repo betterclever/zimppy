@@ -4,3 +4,16 @@ export { NapiCryptoClient, HttpCryptoClient, createCryptoBackend } from './crypt
 export type { CryptoBackend, VerifyTransparentRequest, VerifyResult } from './crypto-client.js'
 export { ZcashChargeServer } from './server.js'
 export type { ZcashServerConfig, PaymentChallenge, PaymentReceipt } from './server.js'
+export {
+  zcashCredentialPayloadSchema,
+  zcashMethod,
+  zcashRequestSchema,
+  zcashServer,
+  zcashClient,
+} from './mppx.js'
+export type {
+  ZcashClientOptions,
+  ZcashClientPayment,
+  ZcashServerOptions,
+  ZcashVerifyResult,
+} from './mppx.js'

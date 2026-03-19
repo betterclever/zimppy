@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use zimppy_core::replay::ConsumedTxids;
 use zimppy_core::rpc::ZebradRpc;
+use zimppy_core::shielded::{self, ShieldedVerifyRequest};
 use zimppy_core::transparent::{self, TransparentVerifyRequest};
 
 #[napi(object)]
@@ -12,6 +13,15 @@ pub struct NapiVerifyResult {
     pub observed_address: String,
     pub observed_amount_zat: String,
     pub confirmations: u32,
+}
+
+#[napi(object)]
+pub struct NapiShieldedVerifyResult {
+    pub verified: bool,
+    pub txid: String,
+    pub observed_amount_zat: String,
+    pub memo_matched: bool,
+    pub outputs_decrypted: u32,
 }
 
 #[napi]
@@ -59,6 +69,38 @@ impl ZimppyCore {
             observed_address: result.observed_address,
             observed_amount_zat: result.observed_amount_zat.to_string(),
             confirmations: result.confirmations,
+        })
+    }
+
+    #[napi]
+    pub async fn verify_shielded(
+        &self,
+        txid: String,
+        orchard_ivk: String,
+        expected_challenge_id: String,
+        expected_amount_zat: String,
+    ) -> napi::Result<NapiShieldedVerifyResult> {
+        let amount: u64 = expected_amount_zat
+            .parse()
+            .map_err(|_| napi::Error::from_reason("invalid amount: must be numeric string"))?;
+
+        let req = ShieldedVerifyRequest {
+            txid,
+            ivk_bytes_hex: orchard_ivk,
+            expected_challenge_id,
+            expected_amount_zat: amount,
+        };
+
+        let result = shielded::verify_shielded(&self.rpc, &req, &self.consumed)
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+        Ok(NapiShieldedVerifyResult {
+            verified: result.verified,
+            txid: result.txid,
+            observed_amount_zat: result.observed_amount_zat.to_string(),
+            memo_matched: result.memo_matched,
+            outputs_decrypted: result.outputs_decrypted,
         })
     }
 

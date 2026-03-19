@@ -1,135 +1,115 @@
+import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { ZcashChargeServer } from 'zimppy-ts'
+import { Mppx, Transport } from 'mppx/server'
+import { zcashServer } from 'zimppy-ts'
 
-const RECIPIENT = process.env.ZCASH_RECIPIENT ?? 'tmHQEhKoEkBFR49E6dGG1QCMz4VEBrTpjCp'
-const NETWORK = 'testnet' as const
-const CRYPTO_ENDPOINT = process.env.CRYPTO_ENDPOINT ?? 'http://127.0.0.1:3181'
+const configPath = process.env.SERVER_WALLET_CONFIG ?? 'config/server-wallet.json'
+const walletConfig = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+  network: 'testnet' | 'mainnet'
+  address: string
+  orchardIvk: string
+}
 
-const zcash = new ZcashChargeServer({
-  recipient: RECIPIENT,
-  network: NETWORK,
-  cryptoEndpoint: CRYPTO_ENDPOINT,
-})
+const RPC_ENDPOINT = process.env.ZCASH_RPC_ENDPOINT ?? 'https://zcash-testnet-zebrad.gateway.tatum.io'
+const MPP_SECRET_KEY = process.env.MPP_SECRET_KEY ?? 'zimppy-mcp-secret-key'
 
 const server = new McpServer({
   name: 'zimppy-mcp',
   version: '0.1.0',
 })
 
-// Tool pricing in zatoshis
+const payment = Mppx.create({
+  methods: [
+    zcashServer({
+      orchardIvk: walletConfig.orchardIvk,
+      rpcEndpoint: RPC_ENDPOINT,
+    }),
+  ],
+  realm: 'zimppy-mcp',
+  secretKey: MPP_SECRET_KEY,
+  transport: Transport.mcpSdk(),
+})
+
 const TOOL_PRICES: Record<string, string> = {
-  get_weather: '42000',      // 0.00042 ZEC
-  get_zcash_info: '10000',   // 0.0001 ZEC
+  get_weather: '42000',
+  get_zcash_info: '10000',
 }
 
-server.tool(
+function challengeRequest(toolName: keyof typeof TOOL_PRICES) {
+  const challengeId = randomUUID()
+  return {
+    amount: TOOL_PRICES[toolName],
+    currency: 'ZEC',
+    recipient: walletConfig.address,
+    network: walletConfig.network,
+    memo: `zimppy:${challengeId}`,
+    challengeId,
+  }
+}
+
+function paidTool(
+  toolName: keyof typeof TOOL_PRICES,
+  schema: Record<string, z.ZodType>,
+  handler: (args: Record<string, unknown>) => Promise<string>,
+) {
+  server.tool(toolName, schema, async (args, extra) => {
+    const result = await payment.charge(challengeRequest(toolName))(extra)
+    if (result.status === 402) {
+      console.error(`[MCP:${toolName}] Payment required`)
+      throw result.challenge
+    }
+
+    console.error(`[MCP:${toolName}] Payment verified`)
+    return result.withReceipt({
+      content: [{ type: 'text', text: await handler(args as Record<string, unknown>) }],
+    })
+  })
+}
+
+paidTool(
   'get_weather',
   { city: z.string().describe('City name') },
-  async (args, extra) => {
-    const meta = extra._meta as Record<string, unknown> | undefined
-    const credential = meta?.['org.paymentauth/credential'] as string | undefined
-
-    if (!credential) {
-      const challenge = zcash.createChallenge(TOOL_PRICES.get_weather)
-      return {
-        content: [{ type: 'text', text: 'Payment required' }],
-        _meta: {
-          'org.paymentauth/challenge': challenge,
-          'org.paymentauth/www-authenticate': zcash.formatWwwAuthenticate(challenge),
-        },
-        isError: true,
-      }
+  async (args) => {
+    const city = (args.city as string) ?? 'Unknown'
+    const weather = {
+      city,
+      temperature: Math.floor(Math.random() * 35) + 5,
+      condition: ['sunny', 'cloudy', 'rainy', 'windy'][Math.floor(Math.random() * 4)],
+      humidity: Math.floor(Math.random() * 60) + 30,
     }
-
-    try {
-      const parsed = zcash.parseCredential(credential)
-      const receipt = await zcash.verify(parsed, TOOL_PRICES.get_weather)
-
-      const city = args.city ?? 'Unknown'
-      // Mock weather data
-      const weather = {
-        city,
-        temperature: Math.floor(Math.random() * 35) + 5,
-        condition: ['sunny', 'cloudy', 'rainy', 'windy'][Math.floor(Math.random() * 4)],
-        humidity: Math.floor(Math.random() * 60) + 30,
-      }
-
-      return {
-        content: [{ type: 'text', text: JSON.stringify(weather, null, 2) }],
-        _meta: { 'org.paymentauth/receipt': receipt },
-      }
-    } catch (err) {
-      return {
-        content: [{ type: 'text', text: `Payment verification failed: ${(err as Error).message}` }],
-        isError: true,
-      }
-    }
+    return JSON.stringify(weather, null, 2)
   },
 )
 
-server.tool(
+paidTool(
   'get_zcash_info',
   {},
-  async (_args, extra) => {
-    const meta = extra._meta as Record<string, unknown> | undefined
-    const credential = meta?.['org.paymentauth/credential'] as string | undefined
-
-    if (!credential) {
-      const challenge = zcash.createChallenge(TOOL_PRICES.get_zcash_info)
-      return {
-        content: [{ type: 'text', text: 'Payment required' }],
-        _meta: {
-          'org.paymentauth/challenge': challenge,
-          'org.paymentauth/www-authenticate': zcash.formatWwwAuthenticate(challenge),
-        },
-        isError: true,
-      }
-    }
-
-    try {
-      const parsed = zcash.parseCredential(credential)
-      const receipt = await zcash.verify(parsed, TOOL_PRICES.get_zcash_info)
-
-      const info = {
-        network: 'testnet',
-        protocol: 'Zcash',
-        pools: ['transparent', 'sapling', 'orchard'],
-        blockTime: '~75 seconds',
-        consensus: 'Proof-of-Work (Equihash)',
-        privacyFeature: 'zk-SNARKs (Halo 2)',
-      }
-
-      return {
-        content: [{ type: 'text', text: JSON.stringify(info, null, 2) }],
-        _meta: { 'org.paymentauth/receipt': receipt },
-      }
-    } catch (err) {
-      return {
-        content: [{ type: 'text', text: `Payment verification failed: ${(err as Error).message}` }],
-        isError: true,
-      }
-    }
-  },
+  async () => JSON.stringify({
+    network: walletConfig.network,
+    protocol: 'Zcash',
+    pools: ['transparent', 'sapling', 'orchard'],
+    blockTime: '~75 seconds',
+    consensus: 'Proof-of-Work (Equihash)',
+    privacyFeature: 'zk-SNARKs (Halo 2)',
+    serverAddress: walletConfig.address,
+  }, null, 2),
 )
 
-// Free tool for testing
-server.tool(
-  'ping',
-  {},
-  async () => ({
-    content: [{ type: 'text', text: JSON.stringify({ pong: true, timestamp: new Date().toISOString() }) }],
-  }),
-)
+server.tool('ping', {}, async () => ({
+  content: [{ type: 'text', text: JSON.stringify({ pong: true, timestamp: new Date().toISOString() }) }],
+}))
 
 async function main() {
   const transport = new StdioServerTransport()
   await server.connect(transport)
   console.error('zimppy MCP server running on stdio')
-  console.error(`  Recipient: ${RECIPIENT}`)
-  console.error(`  Network: ${NETWORK}`)
-  console.error(`  Crypto endpoint: ${CRYPTO_ENDPOINT}`)
+  console.error(`  Server wallet: ${walletConfig.address.slice(0, 20)}...`)
+  console.error(`  Network: ${walletConfig.network}`)
+  console.error(`  RPC: ${RPC_ENDPOINT}`)
+  console.error(`  Paid tools: ${Object.keys(TOOL_PRICES).join(', ')}`)
 }
 
 main().catch(console.error)

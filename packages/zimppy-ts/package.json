@@ -8,6 +8,7 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
+    "mppx": "^0.4.7",
     "zod": "^3.24.0"
   }
 }
