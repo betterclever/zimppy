@@ -337,6 +337,23 @@ impl ZcashSessionMethod {
     pub fn get_session(&self, session_id: &str) -> Option<SessionState> {
         self.sessions.lock().ok()?.get(session_id).cloned()
     }
+
+    /// Deduct amount from session balance (for SSE streaming).
+    /// Returns remaining balance after deduction.
+    pub fn deduct(&self, session_id: &str, amount_zat: u64) -> Result<u64, SessionError> {
+        let mut sessions = self.sessions.lock().map_err(|_| SessionError::LockError)?;
+        let state = sessions.get_mut(session_id)
+            .ok_or_else(|| SessionError::SessionNotFound(session_id.to_string()))?;
+        if state.status != SessionStatus::Active {
+            return Err(SessionError::SessionNotActive(session_id.to_string()));
+        }
+        let remaining = state.deposit_amount_zat.saturating_sub(state.spent_zat);
+        if amount_zat > remaining {
+            return Err(SessionError::InsufficientBalance { needed: amount_zat, available: remaining });
+        }
+        state.spent_zat += amount_zat;
+        Ok(state.deposit_amount_zat.saturating_sub(state.spent_zat))
+    }
 }
 
 /// Result of session verification.

@@ -1,6 +1,7 @@
 pub mod charge;
 pub mod provider;
 pub mod session;
+pub mod sse;
 
 pub use charge::ZcashChargeMethod;
 pub use provider::ZcashPaymentProvider;
