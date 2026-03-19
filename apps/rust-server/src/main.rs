@@ -12,6 +12,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 
 use zimppy_rs::{ZcashChargeMethod, ZcashSessionMethod};
+use zimppy_rs::session::RefundConfig;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -79,7 +80,20 @@ async fn main() {
     eprintln!("  challenge IDs: HMAC-SHA256");
 
     let payment = ZcashChargeMethod::new(&rpc_endpoint, &config.address, &config.orchard_ivk);
-    let session = ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk);
+
+    let wallet_dir = std::env::var("ZCASH_WALLET_DIR")
+        .unwrap_or_else(|_| "/tmp/zcash-wallet-server".to_string());
+    let identity_file = std::env::var("ZCASH_IDENTITY_FILE")
+        .unwrap_or_else(|_| format!("{wallet_dir}/identity.txt"));
+    let lwd_server = std::env::var("ZCASH_LWD_SERVER")
+        .unwrap_or_else(|_| "testnet.zec.rocks:443".to_string());
+
+    let session = ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
+        .with_refund_config(RefundConfig {
+            wallet_dir: wallet_dir.clone(),
+            identity_file,
+            lightwalletd_server: lwd_server,
+        });
 
     let state = Arc::new(AppState {
         payment,

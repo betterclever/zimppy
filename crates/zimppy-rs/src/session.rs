@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,14 @@ pub enum SessionPayload {
     },
 }
 
+/// Config for server-side refund sending via zcash-devtool.
+#[derive(Clone)]
+pub struct RefundConfig {
+    pub wallet_dir: String,
+    pub identity_file: String,
+    pub lightwalletd_server: String,
+}
+
 /// Zcash session method — manages prepaid balance sessions.
 #[derive(Clone)]
 pub struct ZcashSessionMethod {
@@ -60,6 +69,7 @@ pub struct ZcashSessionMethod {
     orchard_ivk: String,
     consumed: ConsumedTxids,
     sessions: Arc<Mutex<HashMap<String, SessionState>>>,
+    refund_config: Option<RefundConfig>,
 }
 
 impl ZcashSessionMethod {
@@ -69,7 +79,13 @@ impl ZcashSessionMethod {
             orchard_ivk: orchard_ivk.to_string(),
             consumed: ConsumedTxids::new(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            refund_config: None,
         }
+    }
+
+    pub fn with_refund_config(mut self, config: RefundConfig) -> Self {
+        self.refund_config = Some(config);
+        self
     }
 
     pub fn method(&self) -> &str {
@@ -266,7 +282,46 @@ impl ZcashSessionMethod {
         let refund_amount = state.deposit_amount_zat.saturating_sub(state.spent_zat);
         eprintln!("[session:close] {session_id}: refund={refund_amount} to {}", &state.refund_address[..20.min(state.refund_address.len())]);
 
-        // TODO: send refund tx via zcash-devtool when refund_amount > 0
+        if refund_amount > 0 {
+            if let Some(ref cfg) = self.refund_config {
+                eprintln!("[session:close] Sending refund of {refund_amount} zat...");
+
+                let sync = Command::new("zcash-devtool")
+                    .args(["wallet", "-w", &cfg.wallet_dir, "sync",
+                           "--server", &cfg.lightwalletd_server,
+                           "--connection", "direct"])
+                    .output();
+
+                if let Err(e) = &sync {
+                    eprintln!("[session:close] Sync failed: {e}");
+                }
+
+                let send = Command::new("zcash-devtool")
+                    .args(["wallet", "-w", &cfg.wallet_dir, "send",
+                           "-i", &cfg.identity_file,
+                           "--server", &cfg.lightwalletd_server,
+                           "--connection", "direct",
+                           "--address", &state.refund_address,
+                           "--value", &refund_amount.to_string(),
+                           "--memo", &format!("zimppy-refund:{session_id}")])
+                    .output();
+
+                match send {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let txid = stdout.lines()
+                            .find(|l| l.len() == 64 && l.chars().all(|c| c.is_ascii_hexdigit()))
+                            .unwrap_or("unknown");
+                        eprintln!("[session:close] Refund sent: {txid}");
+                    }
+                    Err(e) => {
+                        eprintln!("[session:close] Refund send failed: {e}");
+                    }
+                }
+            } else {
+                eprintln!("[session:close] No refund config — skipping refund of {refund_amount} zat");
+            }
+        }
 
         state.status = SessionStatus::Closed;
         eprintln!("[session:close] {session_id} closed. Total spent: {}", state.spent_zat);
