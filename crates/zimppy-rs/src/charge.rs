@@ -1,27 +1,27 @@
 use std::future::Future;
 
-use zimppy_core::{
-    ConsumedTxids, TransparentVerifyRequest, VerifyError, ZebradRpc, verify_transparent,
-};
+use zimppy_core::replay::ConsumedTxids;
+use zimppy_core::rpc::ZebradRpc;
+use zimppy_core::shielded::{self, ShieldedVerifyRequest, ShieldedVerifyError};
 
-/// Zcash charge verification method.
+/// Zcash charge verification method using Orchard shielded transactions.
 ///
-/// Verifies one-time Zcash payments by checking transparent transaction outputs
-/// against expected address and amount.
-///
-/// Designed to implement the mpp-rs `ChargeMethod` trait when that dependency is added.
+/// Verifies payments by decrypting Orchard actions with the server's
+/// Incoming Viewing Key (IVK), checking amount and memo binding.
 #[derive(Clone)]
 pub struct ZcashChargeMethod {
     rpc: ZebradRpc,
     recipient: String,
+    orchard_ivk: String,
     consumed: ConsumedTxids,
 }
 
 impl ZcashChargeMethod {
-    pub fn new(rpc_endpoint: &str, recipient: &str) -> Self {
+    pub fn new(rpc_endpoint: &str, recipient: &str, orchard_ivk: &str) -> Self {
         Self {
             rpc: ZebradRpc::new(rpc_endpoint),
             recipient: recipient.to_string(),
+            orchard_ivk: orchard_ivk.to_string(),
             consumed: ConsumedTxids::new(),
         }
     }
@@ -34,29 +34,34 @@ impl ZcashChargeMethod {
         &self.recipient
     }
 
-    /// Verify a transparent Zcash payment.
+    /// Verify a shielded Zcash payment.
     ///
-    /// This will be wired to `ChargeMethod::verify()` when mpp-rs is integrated.
+    /// Decrypts Orchard actions with the server's IVK, checks:
+    /// - Amount >= expected
+    /// - Memo contains `zimppy:{challenge_id}`
+    /// - Txid not replayed
     pub fn verify_payment(
         &self,
         txid: &str,
-        output_index: u32,
+        challenge_id: &str,
         expected_amount_zat: u64,
-    ) -> impl Future<Output = Result<VerifyOutcome, VerifyError>> + Send + '_ {
-        let req = TransparentVerifyRequest {
+    ) -> impl Future<Output = Result<VerifyOutcome, ShieldedVerifyError>> + Send + '_ {
+        let req = ShieldedVerifyRequest {
             txid: txid.to_string(),
-            output_index,
-            expected_address: self.recipient.clone(),
+            ivk_bytes_hex: self.orchard_ivk.clone(),
+            expected_challenge_id: challenge_id.to_string(),
             expected_amount_zat,
         };
 
         async move {
-            let result = verify_transparent(&self.rpc, &req, &self.consumed).await?;
+            let result = shielded::verify_shielded(&self.rpc, &req, &self.consumed).await?;
 
             Ok(VerifyOutcome {
                 verified: result.verified,
                 txid: result.txid,
-                confirmations: result.confirmations,
+                observed_amount_zat: result.observed_amount_zat,
+                memo_matched: result.memo_matched,
+                outputs_decrypted: result.outputs_decrypted,
             })
         }
     }
@@ -67,7 +72,9 @@ impl ZcashChargeMethod {
 pub struct VerifyOutcome {
     pub verified: bool,
     pub txid: String,
-    pub confirmations: u32,
+    pub observed_amount_zat: u64,
+    pub memo_matched: bool,
+    pub outputs_decrypted: u32,
 }
 
 #[cfg(test)]
@@ -76,13 +83,13 @@ mod tests {
 
     #[test]
     fn method_returns_zcash() {
-        let method = ZcashChargeMethod::new("http://localhost:18232", "tmTestAddr");
+        let method = ZcashChargeMethod::new("http://localhost:18232", "utest1...", "deadbeef");
         assert_eq!(method.method(), "zcash");
     }
 
     #[test]
     fn recipient_returns_configured_address() {
-        let method = ZcashChargeMethod::new("http://localhost:18232", "tmMyAddr123");
-        assert_eq!(method.recipient(), "tmMyAddr123");
+        let method = ZcashChargeMethod::new("http://localhost:18232", "utest1abc", "deadbeef");
+        assert_eq!(method.recipient(), "utest1abc");
     }
 }
