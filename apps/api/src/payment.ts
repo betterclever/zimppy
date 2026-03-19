@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import type { ApiRuntimeConfig } from "./config.js";
 
@@ -72,7 +73,9 @@ export function createPaymentChallenge(
   requestMethod: string,
   requestPath: string,
 ): PaymentChallenge {
-  const challengeId = createChallengeId(config, requestMethod, requestPath);
+  const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS).toISOString();
+  const request = buildChallengeRequest(config, requestMethod, requestPath, expiresAt);
+  const challengeId = createChallengeId(request);
 
   return {
     scheme: "Payment",
@@ -82,23 +85,7 @@ export function createPaymentChallenge(
     intent: CHALLENGE_INTENT,
     request: {
       challengeId,
-      resource: requestPath,
-      payment: {
-        network: config.remoteChainService.network,
-        amountZat: PAYMENT_AMOUNT_ZAT,
-        asset: PAYMENT_ASSET,
-        receiver: DEMO_RECIPIENT,
-      },
-      requestBinding: {
-        method: requestMethod,
-        path: requestPath,
-      },
-      verifier: {
-        service: "remote-lightwalletd",
-        endpoint: config.remoteChainService.lightwalletd.endpoint,
-        access: config.remoteChainService.lightwalletd.access,
-      },
-      expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString(),
+      ...request,
     },
   };
 }
@@ -165,20 +152,29 @@ export function isChallengeBoundToRequest(
   requestMethod: string,
   requestPath: string,
 ): boolean {
-  const expectedChallengeId = createChallengeId(config, requestMethod, requestPath);
+  const expectedRequest = buildChallengeRequest(
+    config,
+    requestMethod,
+    requestPath,
+    credential.challenge.request.expiresAt,
+  );
+  const expectedChallengeId = createChallengeId(expectedRequest);
 
   return (
     credential.challenge.id === expectedChallengeId &&
     credential.challenge.method === CHALLENGE_METHOD &&
     credential.challenge.intent === CHALLENGE_INTENT &&
     credential.challenge.request.challengeId === expectedChallengeId &&
-    credential.challenge.request.resource === requestPath &&
-    credential.challenge.request.payment.network === config.remoteChainService.network &&
-    credential.challenge.request.payment.amountZat === PAYMENT_AMOUNT_ZAT &&
-    credential.challenge.request.requestBinding.method === requestMethod &&
-    credential.challenge.request.requestBinding.path === requestPath &&
-    credential.challenge.request.verifier.endpoint ===
-      config.remoteChainService.lightwalletd.endpoint
+    isDeepStrictEqual(
+      {
+        ...credential.challenge.request,
+        challengeId: undefined,
+      },
+      {
+        ...expectedRequest,
+        challengeId: undefined,
+      },
+    )
   );
 }
 
@@ -198,22 +194,44 @@ export function problemDetails(
   };
 }
 
-function createChallengeId(
+function buildChallengeRequest(
   config: ApiRuntimeConfig,
   requestMethod: string,
   requestPath: string,
+  expiresAt: string,
+): Omit<ChallengeRequestPayload, "challengeId"> {
+  return {
+    resource: requestPath,
+    payment: {
+      network: config.remoteChainService.network,
+      amountZat: PAYMENT_AMOUNT_ZAT,
+      asset: PAYMENT_ASSET,
+      receiver: DEMO_RECIPIENT,
+    },
+    requestBinding: {
+      method: requestMethod,
+      path: requestPath,
+    },
+    verifier: {
+      service: "remote-lightwalletd",
+      endpoint: config.remoteChainService.lightwalletd.endpoint,
+      access: config.remoteChainService.lightwalletd.access,
+    },
+    expiresAt,
+  };
+}
+
+function createChallengeId(
+  request: Omit<ChallengeRequestPayload, "challengeId">,
 ): string {
   return createHmac("sha256", CHALLENGE_SECRET)
     .update(
-      [
-        CHALLENGE_REALM,
-        CHALLENGE_METHOD,
-        CHALLENGE_INTENT,
-        requestMethod,
-        requestPath,
-        config.remoteChainService.network,
-        String(PAYMENT_AMOUNT_ZAT),
-      ].join("|"),
+      JSON.stringify({
+        realm: CHALLENGE_REALM,
+        method: CHALLENGE_METHOD,
+        intent: CHALLENGE_INTENT,
+        request,
+      }),
     )
     .digest("base64url");
 }

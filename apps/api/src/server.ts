@@ -11,6 +11,8 @@ import {
   toAuthenticateHeader,
 } from "./payment.js";
 
+const PROBLEM_DETAILS_CONTENT_TYPE = "application/problem+json";
+
 export function createApiServer() {
   const config = loadApiRuntimeConfig();
 
@@ -47,7 +49,7 @@ export function createApiServer() {
         const challenge = createPaymentChallenge(config, requestMethod, requestPath);
 
         response.writeHead(402, {
-          "content-type": "application/json",
+          "content-type": PROBLEM_DETAILS_CONTENT_TYPE,
           "www-authenticate": toAuthenticateHeader(challenge),
         });
         response.end(
@@ -68,7 +70,7 @@ export function createApiServer() {
         const credential = parsePaymentCredential(authorization);
 
         if (isExpiredCredential(credential)) {
-          response.writeHead(401, { "content-type": "application/json" });
+          response.writeHead(401, { "content-type": PROBLEM_DETAILS_CONTENT_TYPE });
           response.end(
             JSON.stringify(
               problemDetails(
@@ -83,7 +85,7 @@ export function createApiServer() {
         }
 
         if (!isChallengeBoundToRequest(credential, config, requestMethod, requestPath)) {
-          response.writeHead(400, { "content-type": "application/json" });
+          response.writeHead(400, { "content-type": PROBLEM_DETAILS_CONTENT_TYPE });
           response.end(
             JSON.stringify(
               problemDetails(
@@ -97,7 +99,7 @@ export function createApiServer() {
           return;
         }
 
-        response.writeHead(501, { "content-type": "application/json" });
+        response.writeHead(501, { "content-type": PROBLEM_DETAILS_CONTENT_TYPE });
         response.end(
           JSON.stringify(
             problemDetails(
@@ -110,7 +112,7 @@ export function createApiServer() {
         );
         return;
       } catch {
-        response.writeHead(400, { "content-type": "application/json" });
+        response.writeHead(400, { "content-type": PROBLEM_DETAILS_CONTENT_TYPE });
         response.end(
           JSON.stringify(
             problemDetails(
@@ -125,7 +127,7 @@ export function createApiServer() {
       }
     }
 
-    response.writeHead(404, { "content-type": "application/json" });
+    response.writeHead(404, { "content-type": PROBLEM_DETAILS_CONTENT_TYPE });
     response.end(
       JSON.stringify({
         type: "about:blank",

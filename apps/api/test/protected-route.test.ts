@@ -65,6 +65,10 @@ function decodeChallengeHeader(value: string) {
         network: string;
         amountZat: number;
         asset: string;
+        receiver: {
+          kind: string;
+          value: string;
+        };
       };
       requestBinding: {
         method: string;
@@ -82,6 +86,22 @@ function decodeChallengeHeader(value: string) {
 
 function encodeCredential(payload: unknown) {
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+async function createBoundCredential(port: number) {
+  const challengeResponse = await request(port, "/protected/resource");
+  const challenge = decodeChallengeHeader(challengeResponse.headers["www-authenticate"] as string);
+
+  return {
+    challenge,
+    encoded: encodeCredential({
+      challenge,
+      source: "did:key:z6Mkhx-demo",
+      payload: {
+        txid: "00".repeat(32),
+      },
+    }),
+  };
 }
 
 test("returns 402 Payment challenge bound to the protected request when unpaid", async (t) => {
@@ -103,7 +123,7 @@ test("returns 402 Payment challenge bound to the protected request when unpaid",
   const response = await request(address.port, "/protected/resource");
 
   assert.equal(response.statusCode, 402);
-  assert.equal(response.headers["content-type"], "application/json");
+  assert.equal(response.headers["content-type"], "application/problem+json");
   assert.equal(typeof response.headers["www-authenticate"], "string");
 
   const challenge = decodeChallengeHeader(response.headers["www-authenticate"] as string);
@@ -115,6 +135,10 @@ test("returns 402 Payment challenge bound to the protected request when unpaid",
   assert.equal(challenge.request.payment.network, "testnet");
   assert.equal(challenge.request.payment.amountZat, 42_000);
   assert.equal(challenge.request.payment.asset, "ZEC");
+  assert.deepEqual(challenge.request.payment.receiver, {
+    kind: "transparent_p2pkh",
+    value: "tmYd5nFLM8ptuA6A9LTqCVhGfX3Wb5f4K8p",
+  });
   assert.deepEqual(challenge.request.requestBinding, {
     method: "GET",
     path: "/protected/resource",
@@ -156,6 +180,7 @@ test("returns RFC 9457 problem details for malformed payment credentials", async
   });
 
   assert.equal(response.statusCode, 400);
+  assert.equal(response.headers["content-type"], "application/problem+json");
   assert.equal(response.headers["www-authenticate"], undefined);
   assert.deepEqual(response.bodyJson, {
     type: "https://zimppy.local/problems/invalid-payment-credential",
@@ -217,10 +242,110 @@ test("returns RFC 9457 problem details for expired payment credentials", async (
   });
 
   assert.equal(response.statusCode, 401);
+  assert.equal(response.headers["content-type"], "application/problem+json");
   assert.deepEqual(response.bodyJson, {
     type: "https://zimppy.local/problems/payment-credential-expired",
     title: "Expired payment credential",
     status: 401,
     detail: "The supplied Payment credential has expired.",
+  });
+});
+
+test("rejects credentials whose challenge receiver metadata is tampered", async (t) => {
+  const server = createApiServer();
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  t.after(() => {
+    server.close();
+  });
+
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new TypeError("Expected server to bind to a TCP port");
+  }
+
+  const { challenge } = await createBoundCredential(address.port);
+  const tamperedCredential = encodeCredential({
+    challenge: {
+      ...challenge,
+      request: {
+        ...challenge.request,
+        payment: {
+          ...challenge.request.payment,
+          receiver: {
+            ...challenge.request.payment.receiver,
+            value: "tm9FakeReceiver111111111111111111111",
+          },
+        },
+      },
+    },
+    source: "did:key:z6Mkhx-demo",
+    payload: {
+      txid: "00".repeat(32),
+    },
+  });
+
+  const response = await request(address.port, "/protected/resource", {
+    authorization: `Payment ${tamperedCredential}`,
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.headers["content-type"], "application/problem+json");
+  assert.deepEqual(response.bodyJson, {
+    type: "https://zimppy.local/problems/payment-credential-mismatch",
+    title: "Payment credential mismatch",
+    status: 400,
+    detail: "The supplied Payment credential does not match this protected request.",
+  });
+});
+
+test("rejects credentials whose challenge verifier metadata is tampered", async (t) => {
+  const server = createApiServer();
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  t.after(() => {
+    server.close();
+  });
+
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new TypeError("Expected server to bind to a TCP port");
+  }
+
+  const { challenge } = await createBoundCredential(address.port);
+  const tamperedCredential = encodeCredential({
+    challenge: {
+      ...challenge,
+      request: {
+        ...challenge.request,
+        verifier: {
+          ...challenge.request.verifier,
+          access: "direct",
+        },
+      },
+    },
+    source: "did:key:z6Mkhx-demo",
+    payload: {
+      txid: "00".repeat(32),
+    },
+  });
+
+  const response = await request(address.port, "/protected/resource", {
+    authorization: `Payment ${tamperedCredential}`,
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.headers["content-type"], "application/problem+json");
+  assert.deepEqual(response.bodyJson, {
+    type: "https://zimppy.local/problems/payment-credential-mismatch",
+    title: "Payment credential mismatch",
+    status: 400,
+    detail: "The supplied Payment credential does not match this protected request.",
   });
 });
