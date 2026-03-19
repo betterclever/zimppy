@@ -3,3 +3,10 @@ dist/
 target/
 .DS_Store
 .omc/
+
+# NAPI build artifacts
+*.node
+packages/zimppy-ts/index.d.ts
+
+# Factory.ai artifacts
+.factory/validation/
