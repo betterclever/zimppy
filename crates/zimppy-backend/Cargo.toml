@@ -1,0 +1,15 @@
+[package]
+name = "zimppy-backend"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "zimppy-backend"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tiny_http = "0.12"
+zimppy-core = { path = "../zimppy-core" }
