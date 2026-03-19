@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ZcashChargeServer } from 'zimppy-ts'
@@ -25,8 +26,7 @@ const TOOL_PRICES: Record<string, string> = {
 
 server.tool(
   'get_weather',
-  'Get weather for a city (costs 42000 zatoshis / 0.00042 ZEC)',
-  { city: { type: 'string', description: 'City name' } },
+  { city: z.string().describe('City name') },
   async (args, extra) => {
     const meta = extra._meta as Record<string, unknown> | undefined
     const credential = meta?.['org.paymentauth/credential'] as string | undefined
@@ -47,7 +47,7 @@ server.tool(
       const parsed = zcash.parseCredential(credential)
       const receipt = await zcash.verify(parsed, TOOL_PRICES.get_weather)
 
-      const city = (args as Record<string, string>).city ?? 'Unknown'
+      const city = args.city ?? 'Unknown'
       // Mock weather data
       const weather = {
         city,
@@ -71,7 +71,6 @@ server.tool(
 
 server.tool(
   'get_zcash_info',
-  'Get Zcash network info (costs 10000 zatoshis / 0.0001 ZEC)',
   {},
   async (_args, extra) => {
     const meta = extra._meta as Record<string, unknown> | undefined
@@ -118,7 +117,6 @@ server.tool(
 // Free tool for testing
 server.tool(
   'ping',
-  'Free ping tool for testing connectivity',
   {},
   async () => ({
     content: [{ type: 'text', text: JSON.stringify({ pong: true, timestamp: new Date().toISOString() }) }],
