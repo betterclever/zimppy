@@ -8,21 +8,21 @@ commands:
 
 services:
   lightwalletd-tunnel:
-    start: ssh -f -N -L 3184:127.0.0.1:9067 bettervps
+    start: p=$(lsof -ti tcp:3184); if [ -n "$p" ]; then kill $p; fi; ssh -f -N -L 3184:127.0.0.1:9067 bettervps
     stop: p=$(lsof -ti tcp:3184); if [ -n "$p" ]; then kill $p; fi
     healthcheck: lsof -iTCP:3184 -sTCP:LISTEN >/dev/null
     port: 3184
     depends_on: []
 
   backend:
-    start: PORT=3181 cargo run --bin zimppy-backend
+    start: p=$(lsof -ti tcp:3181); if [ -n "$p" ]; then kill $p; fi; PORT=3181 cargo run --bin zimppy-backend
     stop: p=$(lsof -ti tcp:3181); if [ -n "$p" ]; then kill $p; fi
     healthcheck: curl -sf http://127.0.0.1:3181/health
     port: 3181
     depends_on: [lightwalletd-tunnel]
 
   api:
-    start: PORT=3180 npm run dev:api
+    start: p=$(lsof -ti tcp:3180); if [ -n "$p" ]; then kill $p; fi; PORT=3180 npm run dev:api
     stop: p=$(lsof -ti tcp:3180); if [ -n "$p" ]; then kill $p; fi
     healthcheck: curl -sf http://127.0.0.1:3180/health
     port: 3180

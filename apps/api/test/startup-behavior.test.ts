@@ -11,11 +11,12 @@ test("service startup remains remote-only and SSH-tunnel-friendly", () => {
   const startCommands = manifest
     .split("\n")
     .filter((line) => line.trimStart().startsWith("start:"));
-
-  assert.match(
-    manifest,
-    /start: ssh -f -N -L 3184:127\.0\.0\.1:9067 bettervps/,
+  const tunnelStart = startCommands.find((line) =>
+    line.includes("3184:127.0.0.1:9067 bettervps"),
   );
+
+  assert.ok(tunnelStart, "expected a lightwalletd tunnel start command");
+  assert.match(tunnelStart, /\bssh -f -N -L 3184:127\.0\.0\.1:9067 bettervps\b/);
   assert.match(manifest, /depends_on: \[lightwalletd-tunnel\]/);
 
   for (const line of startCommands) {
