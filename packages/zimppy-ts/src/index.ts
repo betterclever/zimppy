@@ -19,3 +19,14 @@ export type {
   ZcashServerOptions,
   ZcashVerifyResult,
 } from './mppx.js'
+export {
+  zcashSessionMethod,
+  zcashSessionServer,
+  zcashSessionClient,
+  sessionRequestSchema,
+  sessionCredentialPayloadSchema,
+} from './session.js'
+export type {
+  ZcashSessionServerOptions,
+  ZcashSessionClientOptions,
+} from './session.js'
