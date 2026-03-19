@@ -1,12 +1,17 @@
-import { CryptoClient } from './crypto-client.js'
-import { ZcashChargeCredential, ZcashChargeRequest, ZCASH_METHOD_NAME, ZCASH_CHARGE_INTENT } from './method.js'
+import { createCryptoBackend } from './crypto-client.js'
+import type { CryptoBackend } from './crypto-client.js'
+import { ZcashChargeCredential, ZCASH_METHOD_NAME, ZCASH_CHARGE_INTENT } from './method.js'
 import type { ZcashCredential, ZcashRequest } from './method.js'
 
 export interface ZcashServerConfig {
   recipient: string
   network: 'testnet' | 'mainnet'
+  /** Zebrad RPC endpoint for NAPI mode (default: Tatum testnet) */
+  rpcEndpoint?: string
+  /** HTTP endpoint for fallback mode (default: http://127.0.0.1:3181) */
   cryptoEndpoint?: string
-  secretKey?: string
+  /** Force HTTP mode instead of NAPI */
+  forceHttp?: boolean
 }
 
 export interface PaymentChallenge {
@@ -25,13 +30,17 @@ export interface PaymentReceipt {
 }
 
 export class ZcashChargeServer {
-  private crypto: CryptoClient
+  private crypto: CryptoBackend
   private config: ZcashServerConfig
   private realm: string
 
   constructor(config: ZcashServerConfig) {
     this.config = config
-    this.crypto = new CryptoClient(config.cryptoEndpoint ?? 'http://127.0.0.1:3181')
+    this.crypto = createCryptoBackend({
+      rpcEndpoint: config.rpcEndpoint,
+      httpEndpoint: config.cryptoEndpoint,
+      forceHttp: config.forceHttp,
+    })
     this.realm = 'zimppy'
   }
 

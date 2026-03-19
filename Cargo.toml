@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zimppy-core", "crates/zimppy-rs", "crates/zimppy-ports", "apps/rust-server"]
+members = ["crates/zimppy-core", "crates/zimppy-napi", "crates/zimppy-rs", "crates/zimppy-ports", "apps/rust-server"]
 resolver = "2"
 
 [workspace.package]

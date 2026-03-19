@@ -1,0 +1,19 @@
+[package]
+name = "zimppy-napi"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zimppy-core = { path = "../zimppy-core" }
+napi = { version = "2", features = ["napi8", "async"] }
+napi-derive = "2"
+
+[build-dependencies]
+napi-build = "2"
+
+[lints]
+workspace = true

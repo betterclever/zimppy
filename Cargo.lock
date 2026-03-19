@@ -2029,14 +2029,21 @@ dependencies = [
  "bech32",
  "bs58",
  "hex",
- "napi",
- "napi-build",
- "napi-derive",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
  "tower-http",
+]
+
+[[package]]
+name = "zimppy-napi"
+version = "0.1.0"
+dependencies = [
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "zimppy-core",
 ]
 
 [[package]]
