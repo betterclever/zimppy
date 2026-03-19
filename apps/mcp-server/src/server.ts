@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { Mcp } from 'mppx'
 import { Mppx, Transport } from 'mppx/server'
-import { zcashServer } from 'zimppy-ts'
+import { zcashMethod, zcashRequestSchema, zcashServer } from 'zimppy-ts'
 
 const configPath = process.env.SERVER_WALLET_CONFIG ?? 'config/server-wallet.json'
 const walletConfig = JSON.parse(readFileSync(configPath, 'utf-8')) as {
@@ -38,7 +39,21 @@ const TOOL_PRICES: Record<string, string> = {
   get_zcash_info: '10000',
 }
 
-function challengeRequest(toolName: keyof typeof TOOL_PRICES) {
+function challengeRequest(
+  toolName: keyof typeof TOOL_PRICES,
+  extra: { _meta?: Record<string, unknown> },
+) {
+  const credential = extra._meta?.[Mcp.credentialMetaKey] as
+    | { challenge?: { method?: string; intent?: string; request?: unknown } }
+    | undefined
+
+  if (
+    credential?.challenge?.method === zcashMethod.name &&
+    credential?.challenge?.intent === zcashMethod.intent
+  ) {
+    return zcashRequestSchema.parse(credential.challenge.request)
+  }
+
   const challengeId = randomUUID()
   return {
     amount: TOOL_PRICES[toolName],
@@ -56,7 +71,7 @@ function paidTool(
   handler: (args: Record<string, unknown>) => Promise<string>,
 ) {
   server.tool(toolName, schema, async (args, extra) => {
-    const result = await payment.charge(challengeRequest(toolName))(extra)
+    const result = await payment.charge(challengeRequest(toolName, extra))(extra)
     if (result.status === 402) {
       console.error(`[MCP:${toolName}] Payment required`)
       throw result.challenge

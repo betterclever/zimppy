@@ -19,4 +19,12 @@ echo "Lightwalletd: $ZCASH_LWD_SERVER"
 echo "RPC: $ZCASH_RPC_ENDPOINT"
 echo
 
+echo "Waiting for merchant server readiness..."
+for _ in $(seq 1 60); do
+  if curl -fsS "$SERVER_URL/api/health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
 npx tsx apps/demo/pay.ts
