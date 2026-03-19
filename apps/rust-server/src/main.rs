@@ -26,7 +26,10 @@ async fn main() {
 
     let state = Arc::new(AppState {
         payment: ZcashChargeMethod::new(&rpc_endpoint, &recipient),
-        amount_zat: 42_000,
+        amount_zat: std::env::var("PRICE_ZAT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(42_000),
     });
 
     let app = Router::new()
