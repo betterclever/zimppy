@@ -35,11 +35,17 @@ zcash_keys = { version = "0.12", features = ["sapling", "orchard"], optional = t
 zcash_address = { version = "0.10", optional = true }
 zip32 = { version = "0.2", optional = true }
 rand = { version = "0.8", optional = true }
+bip0039 = { version = "0.13", optional = true }
 
 [features]
 default = []
 shielded = ["dep:zcash_primitives", "dep:zcash_note_encryption", "dep:zcash_protocol", "dep:orchard", "dep:sapling-crypto", "dep:jubjub"]
-keygen = ["shielded", "dep:zcash_keys", "dep:zcash_address", "dep:zip32", "dep:rand"]
+keygen = ["shielded", "dep:zcash_keys", "dep:zcash_address", "dep:zip32", "dep:rand", "dep:bip0039"]
+
+[[bin]]
+name = "zimppy-derive-ivk"
+path = "src/derive_ivk.rs"
+required-features = ["keygen"]
 
 [lints]
 workspace = true
