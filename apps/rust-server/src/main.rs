@@ -11,7 +11,7 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 
-use zimppy_rs::ZcashChargeMethod;
+use zimppy_rs::{ZcashChargeMethod, ZcashSessionMethod};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -27,6 +27,7 @@ struct ServerWalletConfig {
 
 struct AppState {
     payment: ZcashChargeMethod,
+    session: ZcashSessionMethod,
     config: ServerWalletConfig,
     amount_zat: u64,
     secret_key: String,
@@ -78,9 +79,11 @@ async fn main() {
     eprintln!("  challenge IDs: HMAC-SHA256");
 
     let payment = ZcashChargeMethod::new(&rpc_endpoint, &config.address, &config.orchard_ivk);
+    let session = ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk);
 
     let state = Arc::new(AppState {
         payment,
+        session,
         config,
         amount_zat: price,
         secret_key,
@@ -90,8 +93,11 @@ async fn main() {
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/fortune", get(fortune))
+        .route("/api/session/fortune", get(session_fortune))
         .route("/.well-known/payment", get(discovery))
         .with_state(state.clone());
+
+    eprintln!("  session endpoint: /api/session/fortune");
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
@@ -136,6 +142,89 @@ async fn fortune(
         }
     }
     issue_challenge(state).await
+}
+
+// ── Session endpoint ────────────────────────────────────────────────────
+
+async fn session_fortune(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Some(auth) = headers.get(header::AUTHORIZATION) {
+        if let Ok(auth_str) = auth.to_str() {
+            if auth_str.starts_with("Payment ") {
+                return handle_session_payment(state, auth_str).await;
+            }
+        }
+    }
+    // No credential — issue session challenge (same as charge but intent=session)
+    issue_challenge(state).await
+}
+
+async fn handle_session_payment(state: Arc<AppState>, auth_str: &str) -> axum::response::Response {
+    let encoded = auth_str.trim_start_matches("Payment ").trim();
+    eprintln!("[SESSION] Received credential");
+
+    let bytes = match base64url_decode(encoded) {
+        Ok(b) => b,
+        Err(_) => return problem_response(400, "Invalid Credential", "invalid base64url"),
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return problem_response(400, "Invalid Credential", &format!("invalid JSON: {e}")),
+    };
+
+    let payload = match value.get("payload") {
+        Some(p) => p.clone(),
+        None => return problem_response(400, "Invalid Credential", "missing payload"),
+    };
+
+    let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+    eprintln!("[SESSION] Action: {action}");
+
+    match state.session.verify_session(&payload, state.amount_zat).await {
+        Ok(result) => {
+            eprintln!("[SESSION] Result: session_id={}, action={}, management={}",
+                result.session_id, result.action, result.is_management);
+
+            let receipt = serde_json::json!({
+                "status": "success",
+                "method": "zcash",
+                "reference": result.session_id,
+                "action": result.action,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            });
+            let encoded_receipt = base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
+
+            if result.is_management {
+                // Management actions (open, topUp, close) → return JSON directly
+                (
+                    StatusCode::OK,
+                    [("payment-receipt", encoded_receipt)],
+                    Json(serde_json::json!({
+                        "status": "ok",
+                        "sessionId": result.session_id,
+                        "action": result.action,
+                    })),
+                )
+                    .into_response()
+            } else {
+                // Bearer action → serve content
+                let fortune = pick_fortune();
+                eprintln!("[SESSION:200] Serving fortune via session: {fortune}");
+                (
+                    StatusCode::OK,
+                    [("payment-receipt", encoded_receipt)],
+                    Json(serde_json::json!({ "fortune": fortune })),
+                )
+                    .into_response()
+            }
+        }
+        Err(e) => {
+            eprintln!("[SESSION] ERROR: {e}");
+            problem_response(402, "Session Error", &e.to_string())
+        }
+    }
 }
 
 // ── Items 1+2: HMAC challenge IDs + RFC 9457 problem details ────────────

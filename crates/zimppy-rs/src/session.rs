@@ -30,18 +30,24 @@ pub enum SessionStatus {
 #[serde(tag = "action", rename_all = "camelCase")]
 pub enum SessionPayload {
     Open {
+        #[serde(rename = "depositTxid")]
         deposit_txid: String,
+        #[serde(rename = "refundAddress")]
         refund_address: String,
     },
     Bearer {
+        #[serde(rename = "sessionId")]
         session_id: String,
         bearer: String,
     },
     TopUp {
+        #[serde(rename = "sessionId")]
         session_id: String,
+        #[serde(rename = "topUpTxid")]
         top_up_txid: String,
     },
     Close {
+        #[serde(rename = "sessionId")]
         session_id: String,
         bearer: String,
     },
