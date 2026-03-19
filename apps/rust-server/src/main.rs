@@ -7,9 +7,15 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use hmac::{Hmac, Mac};
 use serde::Deserialize;
+use sha2::Sha256;
 
 use zimppy_rs::ZcashChargeMethod;
+
+type HmacSha256 = Hmac<Sha256>;
+
+const PROBLEM_JSON: &str = "application/problem+json";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,8 +29,20 @@ struct AppState {
     payment: ZcashChargeMethod,
     config: ServerWalletConfig,
     amount_zat: u64,
+    secret_key: String,
     /// Maps challenge_id -> (amount_zat, timestamp)
     challenges: Mutex<HashMap<String, (u64, u64)>>,
+}
+
+/// Generate HMAC-SHA256 challenge ID per MPP spec.
+/// id = HMAC-SHA256(secret, realm|method|intent|amount|currency|recipient|timestamp)
+fn generate_challenge_id(secret: &str, fields: &[&str]) -> String {
+    let payload = fields.join("|");
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC can take key of any size");
+    mac.update(payload.as_bytes());
+    let result = mac.finalize();
+    hex::encode(result.into_bytes())
 }
 
 #[tokio::main]
@@ -39,6 +57,8 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(42_000);
+    let secret_key = std::env::var("MPP_SECRET_KEY")
+        .unwrap_or_else(|_| "zimppy-demo-secret-key".to_string());
 
     // Load server wallet config
     let config_path = std::env::var("SERVER_WALLET_CONFIG")
@@ -55,6 +75,7 @@ async fn main() {
     eprintln!("  price: {} zat per request", price);
     eprintln!("  RPC: {rpc_endpoint}");
     eprintln!("  port: {port}");
+    eprintln!("  challenge IDs: HMAC-SHA256");
 
     let payment = ZcashChargeMethod::new(&rpc_endpoint, &config.address, &config.orchard_ivk);
 
@@ -62,12 +83,14 @@ async fn main() {
         payment,
         config,
         amount_zat: price,
+        secret_key,
         challenges: Mutex::new(HashMap::new()),
     });
 
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/fortune", get(fortune))
+        .route("/.well-known/payment", get(discovery))
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
@@ -75,11 +98,26 @@ async fn main() {
         .unwrap_or_else(|e| panic!("failed to bind: {e}"));
 
     eprintln!("  listening on http://0.0.0.0:{port}");
+    eprintln!("  discovery: http://0.0.0.0:{port}/.well-known/payment");
     eprintln!();
 
     axum::serve(listener, app)
         .await
         .unwrap_or_else(|e| panic!("server error: {e}"));
+}
+
+// ── Item 3: Discovery endpoint ──────────────────────────────────────────
+
+async fn discovery(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "methods": ["zcash"],
+        "intents": ["charge"],
+        "network": state.config.network,
+        "recipient": state.config.address,
+        "defaultAmount": state.amount_zat.to_string(),
+        "currency": "ZEC",
+        "memo_format": "zimppy:{challenge_id}",
+    }))
 }
 
 async fn health() -> impl IntoResponse {
@@ -90,7 +128,6 @@ async fn fortune(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    // Check for payment credential
     if let Some(auth) = headers.get(header::AUTHORIZATION) {
         if let Ok(auth_str) = auth.to_str() {
             if auth_str.starts_with("Payment ") {
@@ -98,13 +135,25 @@ async fn fortune(
             }
         }
     }
-
-    // No credential — issue 402 challenge
     issue_challenge(state).await
 }
 
+// ── Items 1+2: HMAC challenge IDs + RFC 9457 problem details ────────────
+
 async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
-    let challenge_id = uuid::Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Item 1: HMAC-SHA256 challenge ID per MPP spec
+    let amount_str = state.amount_zat.to_string();
+    let now_str = now.to_string();
+    let challenge_id = generate_challenge_id(
+        &state.secret_key,
+        &["zimppy", "zcash", "charge", &amount_str, "ZEC", &state.config.address, &now_str],
+    );
+
     let memo_template = format!("zimppy:{challenge_id}");
 
     eprintln!("[402] Issuing challenge:");
@@ -112,12 +161,6 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
     eprintln!("  recipient: {}", state.config.address);
     eprintln!("  amount: {} zat", state.amount_zat);
     eprintln!("  memo: {memo_template}");
-
-    // Store challenge for later verification
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
 
     if let Ok(mut challenges) = state.challenges.lock() {
         challenges.insert(challenge_id.clone(), (state.amount_zat, now));
@@ -139,9 +182,13 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
         "Payment id=\"{challenge_id}\", realm=\"zimppy\", method=\"zcash\", intent=\"charge\", request=\"{encoded_request}\""
     );
 
+    // Item 2: RFC 9457 problem details with application/problem+json
     (
         StatusCode::PAYMENT_REQUIRED,
-        [(header::WWW_AUTHENTICATE, www_auth)],
+        [
+            (header::WWW_AUTHENTICATE, www_auth),
+            (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
+        ],
         Json(serde_json::json!({
             "type": "https://zimppy.dev/problems/payment-required",
             "title": "Payment Required",
@@ -158,57 +205,41 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
 
     eprintln!("[AUTH] Received credential");
 
-    // Decode credential
     let (txid, challenge_id) = match decode_credential(encoded) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[AUTH] ERROR: invalid credential: {e}");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": format!("invalid credential: {e}") })),
-            )
-                .into_response();
+            return problem_response(400, "Invalid Credential", &format!("invalid credential: {e}"));
         }
     };
 
     eprintln!("[AUTH] txid: {txid}");
     eprintln!("[AUTH] challenge_id: {challenge_id}");
 
-    // Look up the challenge
     let amount_zat = match state.challenges.lock() {
         Ok(challenges) => {
             match challenges.get(&challenge_id) {
                 Some(&(amount, _)) => amount,
                 None => {
                     eprintln!("[AUTH] ERROR: unknown challenge_id");
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "error": "unknown challenge_id" })),
-                    )
-                        .into_response();
+                    return problem_response(400, "Unknown Challenge", "challenge_id not recognized");
                 }
             }
         }
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "lock error" })),
-            )
-                .into_response();
+            return problem_response(500, "Internal Error", "lock error");
         }
     };
 
     eprintln!("[VERIFY] Verifying shielded payment...");
     eprintln!("[VERIFY] amount: {amount_zat} zat, challenge: {challenge_id}");
 
-    // Verify the shielded payment
     match state.payment.verify_payment(&txid, &challenge_id, amount_zat).await {
         Ok(outcome) => {
             eprintln!("[VERIFY] Result: verified={} amount={} memo_matched={} decrypted={}",
                 outcome.verified, outcome.observed_amount_zat, outcome.memo_matched, outcome.outputs_decrypted);
 
             if outcome.verified {
-                // Remove used challenge
                 if let Ok(mut challenges) = state.challenges.lock() {
                     challenges.remove(&challenge_id);
                 }
@@ -237,27 +268,30 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
                     .into_response()
             } else {
                 eprintln!("[402] Payment not verified: amount or memo mismatch");
-                (
-                    StatusCode::PAYMENT_REQUIRED,
-                    Json(serde_json::json!({
-                        "error": "payment not verified",
-                        "verified": false,
-                        "memo_matched": outcome.memo_matched,
-                        "observed_amount": outcome.observed_amount_zat,
-                    })),
-                )
-                    .into_response()
+                problem_response(402, "Payment Not Verified", "amount or memo mismatch")
             }
         }
         Err(e) => {
             eprintln!("[VERIFY] ERROR: {e}");
-            (
-                StatusCode::PAYMENT_REQUIRED,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response()
+            problem_response(402, "Verification Failed", &e.to_string())
         }
     }
+}
+
+/// RFC 9457 problem details response helper
+fn problem_response(status: u16, title: &str, detail: &str) -> axum::response::Response {
+    let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (
+        code,
+        [(header::CONTENT_TYPE, PROBLEM_JSON.to_string())],
+        Json(serde_json::json!({
+            "type": format!("https://zimppy.dev/problems/{}", title.to_lowercase().replace(' ', "-")),
+            "title": title,
+            "status": status,
+            "detail": detail,
+        })),
+    )
+        .into_response()
 }
 
 fn decode_credential(encoded: &str) -> Result<(String, String), String> {

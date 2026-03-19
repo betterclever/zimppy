@@ -77,6 +77,53 @@ pub struct VerifyOutcome {
     pub outputs_decrypted: u32,
 }
 
+// ── Item 4: mpp-rs ChargeMethod trait implementation ────────────────────
+
+impl mpp::protocol::traits::ChargeMethod for ZcashChargeMethod {
+    fn method(&self) -> &str {
+        "zcash"
+    }
+
+    fn verify(
+        &self,
+        credential: &mpp::protocol::core::PaymentCredential,
+        request: &mpp::protocol::intents::ChargeRequest,
+    ) -> impl std::future::Future<Output = Result<mpp::protocol::core::Receipt, mpp::protocol::traits::VerificationError>> + Send {
+        let credential = credential.clone();
+        let amount: u64 = request.amount.parse().unwrap_or(0);
+        let rpc = self.rpc.clone();
+        let ivk = self.orchard_ivk.clone();
+        let consumed = self.consumed.clone();
+
+        async move {
+            let txid = credential.charge_payload()
+                .map(|p| p.data().to_string())
+                .map_err(|e| mpp::protocol::traits::VerificationError::new(
+                    format!("failed to parse credential payload: {e}")
+                ))?;
+            let challenge_id = credential.challenge.id.clone();
+            let req = shielded::ShieldedVerifyRequest {
+                txid: txid.clone(),
+                ivk_bytes_hex: ivk,
+                expected_challenge_id: challenge_id,
+                expected_amount_zat: amount,
+            };
+
+            let result = shielded::verify_shielded(&rpc, &req, &consumed)
+                .await
+                .map_err(|e| mpp::protocol::traits::VerificationError::new(e.to_string()))?;
+
+            if result.verified {
+                Ok(mpp::protocol::core::Receipt::success("zcash", &result.txid))
+            } else {
+                Err(mpp::protocol::traits::VerificationError::new(
+                    "payment not verified: amount or memo mismatch",
+                ))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
