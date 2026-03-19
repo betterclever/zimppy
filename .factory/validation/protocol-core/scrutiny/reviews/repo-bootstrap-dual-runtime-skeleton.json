@@ -1,0 +1,28 @@
+{
+  "featureId": "repo-bootstrap-dual-runtime-skeleton",
+  "reviewedAt": "2026-03-19T06:55:25Z",
+  "commitId": "ff164894421f9f07b15653b823c3ae3d632b594f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature establishes the requested split TypeScript/Rust skeleton, reserved-port config, and baseline validation entry points, but the TypeScript runtime config resolves the repository root relative to the source file location in a way that breaks the compiled build output.",
+    "issues": [
+      {
+        "file": "apps/api/src/config.ts",
+        "line": 46,
+        "severity": "blocking",
+        "description": "`repoRoot` is derived from `new URL(\"../../../\", import.meta.url)`, which is correct when `tsx` runs the source file under `apps/api/src`, but wrong after `npm run build` emits the file to `dist/apps/api/src` (`tsconfig.json` lines 12-13). In the built artifact, that same relative walk resolves to `<repo>/dist`, so `loadApiRuntimeConfig()` will try to read `dist/config/local-app.json` and `dist/config/remote-chain-service.json`, which the build does not emit. The feature therefore ships a build artifact that cannot load its required config, so the TypeScript skeleton is not fully coherent outside dev mode. The current tests only exercise source-mode execution (`apps/api/test/config.test.ts` and `apps/api/test/health.test.ts`), so this regression is uncovered."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `protocol-worker` skill's mandatory tests-first step does not fit bootstrap features that must create the initial package/test harness before any tests can run. The worker documented this deviation as necessary, and it appears justified for this feature.",
+      "evidence": "Handoff `skillFeedback.deviations[0]` says the repository started without manifests or a runnable test harness, while `.factory/skills/protocol-worker/SKILL.md` line 18 requires writing/extending failing tests first with no bootstrap exception."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the mission artifacts, handoff, target commit, transcript skeleton, skill file, AGENTS guidance, services manifest, and library context for `repo-bootstrap-dual-runtime-skeleton`. The feature mostly matches the bootstrap intent, but I marked it failed because the built TypeScript artifact cannot locate its config files due to source-relative path resolution in `apps/api/src/config.ts`."
+}

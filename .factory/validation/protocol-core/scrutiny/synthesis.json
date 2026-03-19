@@ -1,0 +1,100 @@
+{
+  "milestone": "protocol-core",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cd \"/Users/betterclever/newprojects/experiments/zimppy\" && CI=1 npm run test --if-present && cargo test --workspace -- --test-threads=4",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cd \"/Users/betterclever/newprojects/experiments/zimppy\" && npm run typecheck --if-present && cargo check --workspace --all-targets",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cd \"/Users/betterclever/newprojects/experiments/zimppy\" && npm run lint --if-present && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 5,
+    "passed": 2,
+    "failed": 3,
+    "failedFeatures": [
+      "repo-bootstrap-dual-runtime-skeleton",
+      "rust-backend-wallet-adapter-and-memo-primitives",
+      "mpp-challenge-surface-and-problem-details"
+    ],
+    "resolvedByLaterFeatures": [
+      {
+        "originalFeatureId": "remote-lightwalletd-connectivity-foundation",
+        "resolvedByFeatureId": "protocol-core-startup-test-resilience-fix",
+        "description": "The brittle exact-string startup-behavior test finding from the original connectivity feature is already addressed by the later resilience fix feature reviewed in this same scrutiny round."
+      }
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "repo-bootstrap-dual-runtime-skeleton",
+      "severity": "blocking",
+      "description": "`repoRoot` is derived from `new URL(\"../../../\", import.meta.url)`, which is correct when `tsx` runs the source file under `apps/api/src`, but wrong after `npm run build` emits the file to `dist/apps/api/src` (`tsconfig.json` lines 12-13). In the built artifact, that same relative walk resolves to `<repo>/dist`, so `loadApiRuntimeConfig()` will try to read `dist/config/local-app.json` and `dist/config/remote-chain-service.json`, which the build does not emit. The feature therefore ships a build artifact that cannot load its required config, so the TypeScript skeleton is not fully coherent outside dev mode. The current tests only exercise source-mode execution (`apps/api/test/config.test.ts` and `apps/api/test/health.test.ts`), so this regression is uncovered."
+    },
+    {
+      "featureId": "rust-backend-wallet-adapter-and-memo-primitives",
+      "severity": "blocking",
+      "description": "The mission feature explicitly requires \"key and address abstractions\" (`features.json:400`), but this backend library only introduces address, memo, receiving-term, and verifier types; there is no key/viewing-key/spending-key abstraction anywhere in the implementation. A search for key-related primitives in `crates/zimppy-backend/src/lib.rs` returns no matches, so a stated part of the foundation is still missing rather than deferred behind a typed boundary."
+    },
+    {
+      "featureId": "rust-backend-wallet-adapter-and-memo-primitives",
+      "severity": "blocking",
+      "description": "`Address::new` accepts any string with the expected prefix and performs no additional structural validation, so obviously malformed values such as `tm` or `ztestsapling` are treated as valid receiving addresses. For a foundational wallet/address abstraction, that means transparent or shielded receiving terms can be constructed around unusable recipients, and the included tests only exercise happy-path prefixes rather than rejecting malformed addresses."
+    },
+    {
+      "featureId": "mpp-challenge-surface-and-problem-details",
+      "severity": "blocking",
+      "description": "The invalid/expired credential responses are emitted with `content-type: application/json` instead of `application/problem+json`, so they are JSON bodies shaped like problem details rather than RFC 9457 problem-detail responses. Evidence: the protected-route branch writes `application/json` for the 402/401/400/501 problem responses at lines 49-50, 71, 86, 100, and 113, and the new test suite even codifies `application/json` at `apps/api/test/protected-route.test.ts:106` instead of enforcing the RFC 9457 media type."
+    },
+    {
+      "featureId": "mpp-challenge-surface-and-problem-details",
+      "severity": "blocking",
+      "description": "`isChallengeBoundToRequest` does not validate all of the challenge terms that `createPaymentChallenge` emits. The challenge includes receiver terms plus verifier `service` and `access` metadata at lines 87-99, but the binding check at lines 170-181 only re-checks network, amount, method/path, and verifier endpoint. A credential can therefore tamper with other emitted terms (for example the receiver or verifier metadata) and still be treated as bound to the protected request, which falls short of the feature intent that the challenge terms are bound to the request and that mismatched credentials fail closed."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "protocol-worker skill",
+      "suggestion": "Add a narrow bootstrap exception to the tests-first rule when a feature is responsible for creating the initial manifest or test harness and there is no runnable test surface yet.",
+      "evidence": "Handoff `skillFeedback.deviations[0]` says the repository started without manifests or a runnable test harness, while `.factory/skills/protocol-worker/SKILL.md` line 18 requires writing/extending failing tests first with no bootstrap exception.",
+      "isSystemic": false
+    },
+    {
+      "target": "zcash-backend-worker skill",
+      "suggestion": "Tighten the required transcript or handoff evidence for tests-first compliance so scrutiny reviewers can verify whether failing Rust tests were added before implementation edits.",
+      "evidence": "`/Users/betterclever/newprojects/experiments/zimppy/.factory/skills/zcash-backend-worker/SKILL.md:18` requires failing Rust tests first, while `/Users/betterclever/.factory/missions/6b54359c-94ff-48c3-8d41-8d0353f7b99b/worker-transcripts.jsonl` for worker session `63f0f69c-1cbe-480c-ab27-6fb6f2258358` shows an initial `cargo test -p zimppy-backend`, then `ApplyPatch` edits, and the handoff file marks `skillFeedback.followedProcedure` as true.",
+      "isSystemic": false
+    },
+    {
+      "target": "protocol guidance",
+      "suggestion": "Explicitly state that RFC 9457 problem-detail responses must use the `application/problem+json` media type so implementations and tests do not accept plain `application/json`.",
+      "evidence": "`apps/api/src/server.ts:49-50,71,86,100,113` all emit `application/json` for problem responses, and `apps/api/test/protected-route.test.ts:106` asserts `application/json`. The mission/skill guidance mentions problem details generically but does not spell out the RFC media type requirement.",
+      "isSystemic": true
+    },
+    {
+      "target": "integration-worker skill",
+      "suggestion": "Permit validator-repair tasks to update an already-failing existing test instead of requiring a newly added failing test first.",
+      "evidence": "`/Users/betterclever/newprojects/experiments/zimppy/.factory/skills/integration-worker/SKILL.md` step 3 says to add failing tests first, while the handoff at `/Users/betterclever/.factory/missions/6b54359c-94ff-48c3-8d41-8d0353f7b99b/handoffs/2026-03-19T06-51-20-020Z__protocol-core-startup-test-resilience-fix__dd2fcf0d-ce33-4bd1-978b-331d6f140a72.json` records `skillFeedback.followedProcedure: false` and explains that updating the existing failing startup-behavior test was the smallest correct change.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The remote-lightwalletd-connectivity-foundation review reported a brittle startup-behavior assertion.",
+      "reason": "superseded-by-fix-feature protocol-core-startup-test-resilience-fix in the same scrutiny round"
+    }
+  ],
+  "previousRound": null
+}

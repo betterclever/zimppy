@@ -1,0 +1,22 @@
+{
+  "featureId": "remote-lightwalletd-connectivity-foundation",
+  "reviewedAt": "2026-03-19T06:54:32Z",
+  "commitId": "e09241ab816f19b4816f596b7a2d82dab17bd963",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature largely delivers the intended remote-only lightwalletd wiring, connectivity probe, and health/config surfacing, but it introduces a blockingly brittle startup test that overfits the exact SSH tunnel command string instead of the required behavior.",
+    "issues": [
+      {
+        "file": "apps/api/test/startup-behavior.test.ts",
+        "line": 15,
+        "severity": "blocking",
+        "description": "The test hard-codes the exact `start: ssh -f -N -L 3184:127.0.0.1:9067 bettervps` manifest line, so any legitimate startup hardening (for example, prepending a port cleanup step while still using the same SSH tunnel and still avoiding local Zcash infrastructure) will fail this feature's test even though the required remote-only behavior remains correct. That makes the validation coverage fragile rather than behavior-based. Evidence: the test asserts the full command string at lines 15-18 instead of checking for the presence of the SSH forward arguments and absence of local `zebrad`/`lightwalletd`/`zcashd` startup commands."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, commit diff, transcript skeleton, skill file, AGENTS guidance, services manifest, and library notes. The implementation satisfies the core remote-connectivity intent, but the exact-string startup test introduced a blocking review issue because it is too brittle to safely protect the intended behavior over time."
+}
