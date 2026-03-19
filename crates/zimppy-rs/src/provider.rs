@@ -104,15 +104,12 @@ impl ZcashPaymentProvider {
                 return Err(MppError::InvalidConfig("confirmation timeout".to_string()));
             }
 
-            match rpc.get_transaction_verbose(txid).await {
-                Ok(tx) => {
-                    let confs = tx.confirmations.unwrap_or(0);
-                    if confs > 0 {
-                        eprintln!("[ZcashProvider] Confirmed! {} confirmations", confs);
-                        return Ok(confs);
-                    }
+            if let Ok(tx) = rpc.get_transaction_verbose(txid).await {
+                let confs = tx.confirmations.unwrap_or(0);
+                if confs > 0 {
+                    eprintln!("[ZcashProvider] Confirmed! {} confirmations", confs);
+                    return Ok(confs);
                 }
-                Err(_) => {} // tx not found yet, keep polling
             }
 
             tokio::time::sleep(Duration::from_secs(15)).await;

@@ -3603,9 +3603,11 @@ dependencies = [
 name = "zimppy-rs"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "mpp",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "zimppy-core",
 ]
