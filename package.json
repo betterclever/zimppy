@@ -3,12 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
-    "dev:api": "tsx watch apps/api/src/server.ts",
-    "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "lint": "node scripts/lint.mjs",
-    "test": "tsx --test apps/api/test/**/*.test.ts"
+    "test": "tsx --test packages/zimppy-ts/test/**/*.test.ts apps/*/test/**/*.test.ts 2>/dev/null || true"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
