@@ -158,7 +158,7 @@ impl ZcashSessionMethod {
             session_id: session_id.clone(),
             bearer_hash,
             deposit_amount_zat: deposit_amount,
-            spent_zat: charge_amount_zat,
+            spent_zat: 0, // nothing charged on open — billing starts on first bearer/stream use
             refund_address: refund_address.to_string(),
             network: "testnet".to_string(),
             status: SessionStatus::Active,

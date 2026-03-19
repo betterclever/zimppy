@@ -183,7 +183,7 @@ export function zcashSessionServer(options: ZcashSessionServerOptions) {
       sessionId,
       bearerHash,
       depositAmountZat: depositAmount,
-      spentZat: chargeAmount, // first request charged on open
+      spentZat: 0, // nothing charged on open — billing starts on first bearer/stream use
       refundAddress,
       network,
       status: 'active',
