@@ -1,7 +1,9 @@
 use std::error::Error;
 use std::fmt;
 use std::fs;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -114,7 +116,10 @@ impl RuntimeConfig {
             },
             "remoteChainService": {
                 "network": self.remote_chain_service.network,
+                "access": self.remote_chain_service.lightwalletd.access,
                 "endpoint": self.remote_chain_service.lightwalletd.endpoint,
+                "upstreamHostAlias": self.remote_chain_service.upstream.host_alias,
+                "upstreamPort": self.remote_chain_service.upstream.remote_port,
             },
             "storage": {
                 "stateDirectory": self.state_directory.display().to_string(),
@@ -310,6 +315,25 @@ pub struct ChainVerifierLocator {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum LightwalletdConnectivityStatus {
+    Reachable,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LightwalletdConnectionStatus {
+    pub service: ChainService,
+    pub endpoint: String,
+    pub access: String,
+    pub host: String,
+    pub port: u16,
+    pub upstream_host_alias: String,
+    pub upstream_port: u16,
+    pub status: LightwalletdConnectivityStatus,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum ChainService {
     RemoteLightwalletd,
 }
@@ -397,15 +421,58 @@ pub trait LightwalletdVerificationClient {
 
 #[derive(Debug, Clone)]
 pub struct RemoteLightwalletdVerifier {
+    access: String,
     endpoint: String,
+    host: String,
+    port: u16,
+    upstream_host_alias: String,
+    upstream_port: u16,
 }
 
 impl RemoteLightwalletdVerifier {
     #[must_use]
     pub fn new(config: &RemoteChainServiceConfig) -> Self {
         Self {
+            access: config.lightwalletd.access.clone(),
             endpoint: config.lightwalletd.endpoint.clone(),
+            host: config.lightwalletd.host.clone(),
+            port: config.lightwalletd.port,
+            upstream_host_alias: config.upstream.host_alias.clone(),
+            upstream_port: config.upstream.remote_port,
         }
+    }
+
+    pub fn check_connectivity(&self) -> Result<LightwalletdConnectionStatus, VerificationError> {
+        let target = format!("{}:{}", self.host, self.port);
+        let socket_address = (self.host.as_str(), self.port)
+            .to_socket_addrs()
+            .map_err(|_| VerificationError::RemoteUnavailable {
+                endpoint: self.endpoint.clone(),
+                detail: format!("tcp connect to {target} failed"),
+            })?
+            .next()
+            .ok_or_else(|| VerificationError::RemoteUnavailable {
+                endpoint: self.endpoint.clone(),
+                detail: format!("tcp connect to {target} failed"),
+            })?;
+
+        TcpStream::connect_timeout(&socket_address, Duration::from_secs(2)).map_err(|_| {
+            VerificationError::RemoteUnavailable {
+                endpoint: self.endpoint.clone(),
+                detail: format!("tcp connect to {target} failed"),
+            }
+        })?;
+
+        Ok(LightwalletdConnectionStatus {
+            service: ChainService::RemoteLightwalletd,
+            endpoint: self.endpoint.clone(),
+            access: self.access.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            upstream_host_alias: self.upstream_host_alias.clone(),
+            upstream_port: self.upstream_port,
+            status: LightwalletdConnectivityStatus::Reachable,
+        })
     }
 }
 
@@ -443,6 +510,10 @@ pub enum VerificationError {
         endpoint: String,
         flow: &'static str,
     },
+    RemoteUnavailable {
+        endpoint: String,
+        detail: String,
+    },
 }
 
 impl fmt::Display for VerificationError {
@@ -452,6 +523,12 @@ impl fmt::Display for VerificationError {
                 write!(
                     f,
                     "{flow} verification requires remote lightwalletd lookup via {endpoint}"
+                )
+            }
+            Self::RemoteUnavailable { endpoint, detail } => {
+                write!(
+                    f,
+                    "remote lightwalletd access path {endpoint} is unavailable: {detail}"
                 )
             }
         }
@@ -489,10 +566,15 @@ fn hex_decode(value: &str) -> Result<Vec<u8>, MemoError> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
     use super::{
         build_shielded_terms, build_transparent_terms, Address, ChainService, ChallengeBinding,
-        LightwalletdVerificationClient, MemoError, MemoPayload, ReceiverKind,
-        RemoteLightwalletdVerifier, RuntimeConfig, VerificationError, ZcashNetwork,
+        LightwalletdConnectivityStatus, LightwalletdVerificationClient, MemoError, MemoPayload,
+        ReceiverKind, RemoteChainServiceConfig, RemoteLightwalletdVerifier, RuntimeConfig,
+        VerificationError, ZcashNetwork,
     };
 
     #[test]
@@ -627,6 +709,87 @@ mod tests {
             VerificationError::UnimplementedRemoteLookup {
                 endpoint: "http://127.0.0.1:3184".to_string(),
                 flow: "transparent",
+            }
+        );
+    }
+
+    #[test]
+    fn connectivity_check_reports_reachable_ssh_tunnel_path() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .unwrap_or_else(|error| panic!("listener should bind: {error}"));
+        let address = listener
+            .local_addr()
+            .unwrap_or_else(|error| panic!("listener address should resolve: {error}"));
+        let config = RemoteChainServiceConfig {
+            network: ZcashNetwork::Testnet,
+            lightwalletd: super::LightwalletdConfig {
+                access: "ssh-tunnel".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: address.port(),
+                endpoint: format!("http://127.0.0.1:{}", address.port()),
+            },
+            upstream: super::UpstreamConfig {
+                host_alias: "bettervps".to_string(),
+                remote_port: 9067,
+            },
+        };
+        let accept_thread = thread::spawn(move || {
+            let (mut stream, _) = listener
+                .accept()
+                .unwrap_or_else(|error| panic!("listener should accept: {error}"));
+            let mut buffer = [0_u8; 64];
+            let _ = stream.read(&mut buffer);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .unwrap_or_else(|error| panic!("response should write: {error}"));
+        });
+
+        let connectivity = RemoteLightwalletdVerifier::new(&config)
+            .check_connectivity()
+            .unwrap_or_else(|error| panic!("connectivity check should succeed: {error}"));
+
+        accept_thread
+            .join()
+            .unwrap_or_else(|_| panic!("accept thread should complete"));
+
+        assert_eq!(
+            connectivity.status,
+            LightwalletdConnectivityStatus::Reachable
+        );
+        assert_eq!(connectivity.access, "ssh-tunnel");
+        assert_eq!(
+            connectivity.endpoint,
+            format!("http://127.0.0.1:{}", address.port())
+        );
+        assert_eq!(connectivity.upstream_host_alias, "bettervps");
+        assert_eq!(connectivity.upstream_port, 9067);
+    }
+
+    #[test]
+    fn connectivity_check_fails_closed_when_tunnel_path_is_unreachable() {
+        let config = RemoteChainServiceConfig {
+            network: ZcashNetwork::Testnet,
+            lightwalletd: super::LightwalletdConfig {
+                access: "ssh-tunnel".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: 65_530,
+                endpoint: "http://127.0.0.1:65530".to_string(),
+            },
+            upstream: super::UpstreamConfig {
+                host_alias: "bettervps".to_string(),
+                remote_port: 9067,
+            },
+        };
+
+        let error = RemoteLightwalletdVerifier::new(&config)
+            .check_connectivity()
+            .expect_err("connectivity should fail for an unreachable tunnel path");
+
+        assert_eq!(
+            error,
+            VerificationError::RemoteUnavailable {
+                endpoint: "http://127.0.0.1:65530".to_string(),
+                detail: "tcp connect to 127.0.0.1:65530 failed".to_string(),
             }
         );
     }

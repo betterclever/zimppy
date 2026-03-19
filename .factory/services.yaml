@@ -4,6 +4,7 @@ commands:
   lint: npm run lint --if-present && if [ -f Cargo.toml ]; then cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings; fi
   test: CI=1 npm run test --if-present && if [ -f Cargo.toml ]; then cargo test --workspace -- --test-threads=4; fi
   build: npm run build --if-present && if [ -f Cargo.toml ]; then cargo build --workspace; fi
+  check_remote_lightwalletd: cargo run --bin zimppy-backend -- check-remote-lightwalletd
 
 services:
   lightwalletd-tunnel:

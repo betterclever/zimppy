@@ -54,7 +54,10 @@ test("health endpoint reports skeleton service configuration", async (t) => {
     },
     remoteChainService: {
       network: "testnet",
+      access: "ssh-tunnel",
       endpoint: "http://127.0.0.1:3184",
+      upstreamHostAlias: "bettervps",
+      upstreamPort: 9067,
     },
     storage: {
       stateDirectory: ".local/state/zimppy",

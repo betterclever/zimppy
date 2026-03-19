@@ -15,7 +15,10 @@ export function createApiServer() {
           ports: config.localApp.ports,
           remoteChainService: {
             network: config.remoteChainService.network,
+            access: config.remoteChainService.lightwalletd.access,
             endpoint: config.remoteChainService.lightwalletd.endpoint,
+            upstreamHostAlias: config.remoteChainService.upstream.hostAlias,
+            upstreamPort: config.remoteChainService.upstream.remotePort,
           },
           storage: {
             stateDirectory: config.localApp.storage.stateDirectory,
