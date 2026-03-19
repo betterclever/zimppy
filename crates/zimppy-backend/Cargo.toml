@@ -9,6 +9,8 @@ name = "zimppy-backend"
 path = "src/main.rs"
 
 [dependencies]
+bech32 = "0.9"
+bs58 = { version = "0.5", features = ["check"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tiny_http = "0.12"

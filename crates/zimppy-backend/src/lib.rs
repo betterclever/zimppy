@@ -5,6 +5,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bech32::{FromBase32, Variant};
 use serde::{Deserialize, Serialize};
 
 pub type DynError = Box<dyn Error + Send + Sync>;
@@ -178,17 +179,7 @@ impl Address {
         value: impl Into<String>,
     ) -> Result<Self, AddressError> {
         let value = value.into();
-        let expected_prefix = match (network, kind) {
-            (ZcashNetwork::Testnet, ReceiverKind::TransparentP2pkh) => "tm",
-            (ZcashNetwork::Testnet, ReceiverKind::Sapling) => "ztestsapling",
-        };
-
-        if !value.starts_with(expected_prefix) {
-            return Err(AddressError::UnexpectedPrefix {
-                expected: expected_prefix,
-                actual: value,
-            });
-        }
+        validate_address(network, kind, &value)?;
 
         Ok(Self {
             network,
@@ -204,6 +195,12 @@ pub enum AddressError {
         expected: &'static str,
         actual: String,
     },
+    InvalidTransparent {
+        value: String,
+    },
+    InvalidSapling {
+        value: String,
+    },
 }
 
 impl fmt::Display for AddressError {
@@ -212,11 +209,108 @@ impl fmt::Display for AddressError {
             Self::UnexpectedPrefix { expected, actual } => {
                 write!(f, "expected address with prefix {expected}, got {actual}")
             }
+            Self::InvalidTransparent { .. } => f.write_str(
+                "transparent testnet address is not a valid base58check P2PKH recipient",
+            ),
+            Self::InvalidSapling { .. } => {
+                f.write_str("sapling testnet address is not a valid bech32 recipient")
+            }
         }
     }
 }
 
 impl Error for AddressError {}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewingKeyScope {
+    Incoming,
+    Full,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SaplingViewingKey {
+    network: ZcashNetwork,
+    scope: ViewingKeyScope,
+    value: String,
+}
+
+impl SaplingViewingKey {
+    pub fn new(
+        network: ZcashNetwork,
+        scope: ViewingKeyScope,
+        value: impl Into<String>,
+    ) -> Result<Self, KeyError> {
+        let value = value.into();
+
+        if value.trim().is_empty() {
+            return Err(KeyError::EmptyValue {
+                key_type: "sapling viewing key",
+            });
+        }
+
+        Ok(Self {
+            network,
+            scope,
+            value,
+        })
+    }
+
+    #[must_use]
+    pub fn network(&self) -> ZcashNetwork {
+        self.network
+    }
+
+    #[must_use]
+    pub fn scope(&self) -> ViewingKeyScope {
+        self.scope
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum KeyMaterial {
+    TransparentAddress { address: Address },
+    SaplingViewing(SaplingViewingKey),
+}
+
+impl KeyMaterial {
+    #[must_use]
+    pub fn network(&self) -> ZcashNetwork {
+        match self {
+            Self::TransparentAddress { address } => address.network,
+            Self::SaplingViewing(viewing_key) => viewing_key.network(),
+        }
+    }
+
+    #[must_use]
+    pub fn receiver_kind(&self) -> ReceiverKind {
+        match self {
+            Self::TransparentAddress { .. } => ReceiverKind::TransparentP2pkh,
+            Self::SaplingViewing(_) => ReceiverKind::Sapling,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyError {
+    EmptyValue { key_type: &'static str },
+}
+
+impl fmt::Display for KeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyValue { key_type } => write!(f, "{key_type} cannot be empty"),
+        }
+    }
+}
+
+impl Error for KeyError {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ChallengeBinding {
@@ -537,6 +631,77 @@ impl fmt::Display for VerificationError {
 
 impl Error for VerificationError {}
 
+fn validate_address(
+    network: ZcashNetwork,
+    kind: ReceiverKind,
+    value: &str,
+) -> Result<(), AddressError> {
+    match (network, kind) {
+        (ZcashNetwork::Testnet, ReceiverKind::TransparentP2pkh) => {
+            const PREFIX: &str = "tm";
+            const VERSION_BYTES: [u8; 2] = [0x1d, 0x25];
+            const PAYLOAD_LEN: usize = 22;
+
+            if !value.starts_with(PREFIX) {
+                return Err(AddressError::UnexpectedPrefix {
+                    expected: PREFIX,
+                    actual: value.to_string(),
+                });
+            }
+
+            let decoded = bs58::decode(value)
+                .with_check(None)
+                .into_vec()
+                .map_err(|_| AddressError::InvalidTransparent {
+                    value: value.to_string(),
+                })?;
+
+            if decoded.len() != PAYLOAD_LEN || decoded[..2] != VERSION_BYTES {
+                return Err(AddressError::InvalidTransparent {
+                    value: value.to_string(),
+                });
+            }
+
+            Ok(())
+        }
+        (ZcashNetwork::Testnet, ReceiverKind::Sapling) => {
+            const PREFIX: &str = "ztestsapling";
+            const ADDRESS_BYTES: usize = 43;
+
+            if !value.starts_with(PREFIX) {
+                return Err(AddressError::UnexpectedPrefix {
+                    expected: PREFIX,
+                    actual: value.to_string(),
+                });
+            }
+
+            let (hrp, data, variant) =
+                bech32::decode(value).map_err(|_| AddressError::InvalidSapling {
+                    value: value.to_string(),
+                })?;
+
+            if hrp != PREFIX || variant != Variant::Bech32 {
+                return Err(AddressError::InvalidSapling {
+                    value: value.to_string(),
+                });
+            }
+
+            let decoded =
+                Vec::<u8>::from_base32(&data).map_err(|_| AddressError::InvalidSapling {
+                    value: value.to_string(),
+                })?;
+
+            if decoded.len() != ADDRESS_BYTES {
+                return Err(AddressError::InvalidSapling {
+                    value: value.to_string(),
+                });
+            }
+
+            Ok(())
+        }
+    }
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -570,12 +735,25 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
+    use bech32::{ToBase32, Variant};
+
     use super::{
         build_shielded_terms, build_transparent_terms, Address, ChainService, ChallengeBinding,
-        LightwalletdConnectivityStatus, LightwalletdVerificationClient, MemoError, MemoPayload,
-        ReceiverKind, RemoteChainServiceConfig, RemoteLightwalletdVerifier, RuntimeConfig,
-        VerificationError, ZcashNetwork,
+        KeyMaterial, LightwalletdConnectivityStatus, LightwalletdVerificationClient, MemoError,
+        MemoPayload, ReceiverKind, RemoteChainServiceConfig, RemoteLightwalletdVerifier,
+        RuntimeConfig, SaplingViewingKey, VerificationError, ViewingKeyScope, ZcashNetwork,
     };
+
+    fn valid_testnet_transparent_address() -> String {
+        let mut payload = vec![0x1d, 0x25];
+        payload.extend([0_u8; 20]);
+        bs58::encode(payload).with_check().into_string()
+    }
+
+    fn valid_testnet_sapling_address() -> String {
+        bech32::encode("ztestsapling", [0_u8; 43].to_base32(), Variant::Bech32)
+            .unwrap_or_else(|error| panic!("sapling test address should encode: {error}"))
+    }
 
     #[test]
     fn loads_backend_runtime_config_with_reserved_ports() {
@@ -598,7 +776,7 @@ mod tests {
         let recipient = Address::new(
             ZcashNetwork::Testnet,
             ReceiverKind::TransparentP2pkh,
-            "tmYd5nFLM8ptuA6A9LTqCVhGfX3Wb5f4K8p",
+            valid_testnet_transparent_address(),
         )
         .unwrap_or_else(|error| panic!("transparent address should be accepted: {error}"));
 
@@ -618,6 +796,17 @@ mod tests {
     }
 
     #[test]
+    fn transparent_addresses_reject_malformed_base58_values() {
+        let error = Address::new(ZcashNetwork::Testnet, ReceiverKind::TransparentP2pkh, "tm")
+            .expect_err("prefix-only transparent address should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "transparent testnet address is not a valid base58check P2PKH recipient"
+        );
+    }
+
+    #[test]
     fn shielded_terms_embed_decodable_memo_binding() {
         let config = RuntimeConfig::load().unwrap_or_else(|error| {
             panic!("runtime config should load: {error}");
@@ -625,7 +814,7 @@ mod tests {
         let recipient = Address::new(
             ZcashNetwork::Testnet,
             ReceiverKind::Sapling,
-            "ztestsapling1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            valid_testnet_sapling_address(),
         )
         .unwrap_or_else(|error| panic!("shielded address should be accepted: {error}"));
         let binding = ChallengeBinding {
@@ -652,6 +841,37 @@ mod tests {
         assert_eq!(decoded.request_binding_hash, "2f4d9d9e");
         assert_eq!(decoded.recipient_alias, "merchant-sapling");
         assert_eq!(terms.verifier.endpoint, "http://127.0.0.1:3184");
+    }
+
+    #[test]
+    fn shielded_addresses_reject_malformed_bech32_values() {
+        let error = Address::new(ZcashNetwork::Testnet, ReceiverKind::Sapling, "ztestsapling")
+            .expect_err("prefix-only sapling address should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "sapling testnet address is not a valid bech32 recipient"
+        );
+    }
+
+    #[test]
+    fn backend_exposes_explicit_key_abstractions() {
+        let viewing_key = SaplingViewingKey::new(
+            ZcashNetwork::Testnet,
+            ViewingKeyScope::Incoming,
+            "test-sapling-ivk",
+        )
+        .unwrap_or_else(|error| {
+            panic!("viewing key abstraction should accept opaque value: {error}")
+        });
+
+        let key_material = KeyMaterial::SaplingViewing(viewing_key.clone());
+
+        assert_eq!(viewing_key.network(), ZcashNetwork::Testnet);
+        assert_eq!(viewing_key.scope(), ViewingKeyScope::Incoming);
+        assert_eq!(viewing_key.as_str(), "test-sapling-ivk");
+        assert_eq!(key_material.network(), ZcashNetwork::Testnet);
+        assert_eq!(key_material.receiver_kind(), ReceiverKind::Sapling);
     }
 
     #[test]
@@ -684,7 +904,7 @@ mod tests {
         let recipient = Address::new(
             ZcashNetwork::Testnet,
             ReceiverKind::TransparentP2pkh,
-            "tmYd5nFLM8ptuA6A9LTqCVhGfX3Wb5f4K8p",
+            valid_testnet_transparent_address(),
         )
         .unwrap_or_else(|error| panic!("transparent address should be accepted: {error}"));
         let terms = build_transparent_terms(
