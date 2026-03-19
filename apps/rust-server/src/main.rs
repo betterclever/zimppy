@@ -108,8 +108,11 @@ async fn main() {
         .route("/api/health", get(health))
         .route("/api/fortune", get(fortune))
         .route("/api/session/fortune", get(session_fortune))
+        .route("/api/stream/fortune", get(stream_fortune))
         .route("/.well-known/payment", get(discovery))
         .with_state(state.clone());
+
+    eprintln!("  stream endpoint: /api/stream/fortune (SSE, 1000 zat/token)");
 
     eprintln!("  session endpoint: /api/session/fortune");
 
@@ -239,6 +242,119 @@ async fn handle_session_payment(state: Arc<AppState>, auth_str: &str) -> axum::r
             problem_response(402, "Session Error", &e.to_string())
         }
     }
+}
+
+// ── SSE Streaming endpoint ──────────────────────────────────────────────
+
+async fn stream_fortune(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Must have a session credential (bearer action)
+    let auth = match headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+        Some(a) if a.starts_with("Payment ") => a,
+        _ => return issue_challenge(state).await,
+    };
+
+    let encoded = auth.trim_start_matches("Payment ").trim();
+    let bytes = match base64url_decode(encoded) {
+        Ok(b) => b,
+        Err(_) => return problem_response(400, "Invalid Credential", "invalid base64url"),
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return problem_response(400, "Invalid Credential", &format!("invalid JSON: {e}")),
+    };
+    let payload = match value.get("payload") {
+        Some(p) => p.clone(),
+        None => return problem_response(400, "Invalid Credential", "missing payload"),
+    };
+
+    let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("");
+    if action != "bearer" {
+        return problem_response(400, "Invalid Action", "stream requires bearer action");
+    }
+
+    let session_id = payload.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let bearer = payload.get("bearer").and_then(|b| b.as_str()).unwrap_or("");
+
+    // Verify bearer is valid
+    let bearer_hash = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(bearer.as_bytes());
+        hex::encode(hasher.finalize())
+    };
+
+    let session_state = match state.session.get_session(&session_id) {
+        Some(s) => s,
+        None => return problem_response(402, "Session Not Found", "session not found"),
+    };
+
+    if session_state.bearer_hash != bearer_hash {
+        return problem_response(402, "Invalid Bearer", "invalid bearer token");
+    }
+
+    eprintln!("[STREAM] Starting SSE stream for session {session_id}");
+
+    // Generate fortune tokens word by word
+    let fortunes = [
+        "Privacy is not about having something to hide. It is about having the power to choose what to share.",
+        "In a world of surveillance, the shielded transaction is an act of freedom.",
+        "Zero knowledge proofs: where math protects what matters most.",
+        "The best encryption is the one that makes the data invisible, not just unreadable.",
+    ];
+    let fortune = fortunes[std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as usize % fortunes.len()];
+
+    let words: Vec<&str> = fortune.split_whitespace().collect();
+    let tick_cost: u64 = 1000; // 1000 zat per word
+    let mut total_spent: u64 = 0;
+    let mut total_chunks: u64 = 0;
+    let mut body = String::new();
+
+    for word in &words {
+        match state.session.deduct(&session_id, tick_cost) {
+            Ok(remaining) => {
+                total_spent += tick_cost;
+                total_chunks += 1;
+                let data = serde_json::json!({ "token": word, "remaining": remaining });
+                body.push_str(&format!("event: message\ndata: {data}\n\n"));
+                eprintln!("[STREAM] token=\"{word}\" remaining={remaining}");
+            }
+            Err(_) => {
+                let balance = state.session.get_session(&session_id)
+                    .map(|s| s.deposit_amount_zat.saturating_sub(s.spent_zat))
+                    .unwrap_or(0);
+                let need = serde_json::json!({
+                    "sessionId": session_id,
+                    "requiredAmount": tick_cost,
+                    "currentBalance": balance,
+                });
+                body.push_str(&format!("event: payment-need-voucher\ndata: {need}\n\n"));
+                eprintln!("[STREAM] Balance exhausted after {total_chunks} tokens");
+                break;
+            }
+        }
+    }
+
+    // Receipt
+    let receipt = serde_json::json!({
+        "sessionId": session_id,
+        "totalSpent": total_spent,
+        "totalChunks": total_chunks,
+    });
+    body.push_str(&format!("event: payment-receipt\ndata: {receipt}\n\n"));
+    eprintln!("[STREAM] Complete: {total_chunks} tokens, {total_spent} zat");
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/event-stream".to_string())],
+        body,
+    )
+        .into_response()
 }
 
 // ── Items 1+2: HMAC challenge IDs + RFC 9457 problem details ────────────
