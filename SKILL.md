@@ -95,19 +95,29 @@ npx zimppy request -X POST --json '{"city":"Tokyo"}' http://localhost:3180/api/w
 
 ### Zimppy Fortune Teller (http://localhost:3180)
 
-**Use `zimppy request` with these endpoints:**
-
 | Endpoint | Method | Price | Description |
 |---|---|---|---|
 | `/api/fortune` | GET | 10,000 zat | Get a privacy fortune (one-time charge) |
+| `/api/session/fortune` | GET | 5,000 zat/req | Fortune via prepaid session (deposit once, many requests) |
+| `/api/stream/fortune` | GET | 1,000 zat/word | Streamed fortune, pay per word |
 | `/api/health` | GET | Free | Health check |
 | `/.well-known/payment` | GET | Free | Service discovery |
 
-**Always use `/api/fortune` for paid requests.** Do NOT use `/api/session/fortune` or `/api/stream/fortune` directly — those require session management which `zimppy request` does not handle.
+The `zimppy request` command handles all payment flows automatically:
+- **Charge endpoints** (`/api/fortune`): sends one payment per request
+- **Session endpoints** (`/api/session/fortune`): auto-opens a session with a deposit, then uses bearer tokens for subsequent requests — no new on-chain tx needed
+- **Stream endpoints** (`/api/stream/fortune`): opens a session and streams
 
-Example:
 ```bash
+# One-time charge
 npx zimppy request http://localhost:3180/api/fortune
+
+# Session (auto-deposits, then uses bearer for fast repeat calls)
+npx zimppy request http://localhost:3180/api/session/fortune
+npx zimppy request http://localhost:3180/api/session/fortune  # instant! no new tx
+
+# Close session when done
+npx zimppy session close
 ```
 
 ## Common Issues

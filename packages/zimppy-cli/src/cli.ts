@@ -24,8 +24,10 @@ import { join } from 'node:path'
 const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
+const SESSION_FILE = join(CONFIG_DIR, 'session.json')
 const DEFAULT_LWD = 'testnet.zec.rocks:443'
 const DEFAULT_RPC = 'https://zcash-testnet-zebrad.gateway.tatum.io'
+const DEFAULT_DEPOSIT = '100000' // 100,000 zat default session deposit
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -54,6 +56,31 @@ function requireConfig(): ZimppyConfig {
     process.exit(1)
   }
   return cfg
+}
+
+// ── Session state ───────────────────────────────────────────────────
+
+interface SessionState {
+  sessionId: string
+  bearer: string  // the deposit txid
+  url: string     // base URL of the session server
+}
+
+function loadSession(): SessionState | null {
+  if (!existsSync(SESSION_FILE)) return null
+  try { return JSON.parse(readFileSync(SESSION_FILE, 'utf-8')) as SessionState }
+  catch { return null }
+}
+
+function saveSession(session: SessionState): void {
+  mkdirSync(CONFIG_DIR, { recursive: true })
+  writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2))
+}
+
+function clearSession(): void {
+  if (existsSync(SESSION_FILE)) {
+    writeFileSync(SESSION_FILE, '')
+  }
 }
 
 // ── Wallet commands ─────────────────────────────────────────────────
@@ -275,6 +302,31 @@ async function handleRequest(args: string[]): Promise<void> {
 
   if (!terse) console.error(`→ ${method} ${url}`)
 
+  // Check if we have an active session for this URL's base
+  const baseUrl = new URL(url).origin
+  const session = loadSession()
+  if (session && session.url === baseUrl) {
+    if (!terse) console.error(`  🎫 Using active session: ${session.sessionId}`)
+    const bearerCred = Buffer.from(JSON.stringify({
+      payload: { action: 'bearer', sessionId: session.sessionId, bearer: session.bearer },
+    }), 'utf-8').toString('base64url')
+
+    const sessionResp = await fetch(url, {
+      method,
+      headers: { ...headers, Authorization: `Payment ${bearerCred}` },
+      body,
+    })
+
+    if (sessionResp.status === 200) {
+      if (!terse) console.error(`  ✅ Session bearer accepted`)
+      console.log(await sessionResp.text())
+      return
+    }
+    // Session might be expired/closed — fall through to regular flow
+    if (!terse) console.error(`  ⚠️  Session bearer rejected (${sessionResp.status}), falling back to new payment`)
+    clearSession()
+  }
+
   // First request
   const resp1 = await fetch(url, { method, headers, body })
 
@@ -380,37 +432,134 @@ async function handleRequest(args: string[]): Promise<void> {
     } catch { /* keep polling */ }
   }
 
-  // Retry with credential
-  if (!terse) console.error('  🔄 Retrying with payment credential...')
+  // Determine if this is a session endpoint
+  const isSessionEndpoint = url.includes('/session/') || url.includes('/stream/')
 
-  const credential = Buffer.from(JSON.stringify({
-    payload: { txid, challengeId: challenge.challengeId },
+  if (isSessionEndpoint) {
+    // Open a session with the deposit txid
+    if (!terse) console.error('  🎫 Opening session with deposit...')
+    const openCred = Buffer.from(JSON.stringify({
+      payload: { action: 'open', depositTxid: txid, refundAddress: cfg.walletDir },
+    }), 'utf-8').toString('base64url')
+
+    const openResp = await fetch(url, {
+      method,
+      headers: { ...headers, Authorization: `Payment ${openCred}` },
+      body,
+    })
+    const openResult = await openResp.json() as { sessionId?: string; status?: string; fortune?: string }
+
+    if (openResp.status === 200 && openResult.sessionId) {
+      saveSession({ sessionId: openResult.sessionId, bearer: txid, url: baseUrl })
+      if (!terse) {
+        console.error(`  ✅ Session opened: ${openResult.sessionId}`)
+        console.error('')
+        console.error(`  ┌─ Session Active ─────────────────────────────────┐`)
+        console.error(`  │ Session:  ${openResult.sessionId.padEnd(39)}│`)
+        console.error(`  │ Deposit:  ${challenge.amount} zat (${amountZec} ZEC)${''.padEnd(Math.max(0, 22 - amountZec.length))}│`)
+        console.error(`  │ Privacy:  🔒 Fully shielded (Orchard)${''.padEnd(12)}│`)
+        console.error(`  │ Next:     Bearer requests are instant! ${''.padEnd(10)}│`)
+        console.error(`  └─────────────────────────────────────────────────┘`)
+        console.error('')
+      }
+      // If the open also returned content (fortune), show it
+      if (openResult.fortune) {
+        console.log(JSON.stringify(openResult))
+      } else {
+        // Make a bearer request to get actual content
+        if (!terse) console.error('  🎫 Fetching content via bearer...')
+        const bearerCred = Buffer.from(JSON.stringify({
+          payload: { action: 'bearer', sessionId: openResult.sessionId, bearer: txid },
+        }), 'utf-8').toString('base64url')
+        const contentResp = await fetch(url, {
+          method,
+          headers: { ...headers, Authorization: `Payment ${bearerCred}` },
+          body,
+        })
+        console.log(await contentResp.text())
+      }
+    } else {
+      if (!terse) console.error(`  ❌ Session open failed: ${JSON.stringify(openResult)}`)
+    }
+  } else {
+    // Regular charge flow — retry with credential
+    if (!terse) console.error('  🔄 Retrying with payment credential...')
+
+    const credential = Buffer.from(JSON.stringify({
+      payload: { txid, challengeId: challenge.challengeId },
+    }), 'utf-8').toString('base64url')
+
+    const resp2 = await fetch(url, {
+      method,
+      headers: { ...headers, Authorization: `Payment ${credential}` },
+      body,
+    })
+
+    const result = await resp2.text()
+
+    if (resp2.status === 200) {
+      if (!terse) {
+        console.error('')
+        console.error(`  ┌─ Payment Complete ──────────────────────────────┐`)
+        console.error(`  │ Status:  ✅ Verified`)
+        console.error(`  │ Paid:    ${challenge.amount} zat (${amountZec} ZEC)`)
+        console.error(`  │ txid:    ${txid.slice(0, 16)}...${txid.slice(-8)}`)
+        console.error(`  │ Privacy: 🔒 Fully shielded (Orchard)`)
+        console.error(`  └────────────────────────────────────────────────┘`)
+        console.error('')
+      }
+      console.log(result)
+    } else {
+      if (!terse) console.error(`  ❌ ${resp2.status}: Payment verification failed`)
+      console.log(result)
+    }
+  }
+}
+
+// ── Session commands ────────────────────────────────────────────────
+
+async function handleSessionClose(): Promise<void> {
+  const session = loadSession()
+  if (!session) {
+    console.error('No active session.')
+    return
+  }
+
+  console.error(`Closing session ${session.sessionId}...`)
+  const closeCred = Buffer.from(JSON.stringify({
+    payload: { action: 'close', sessionId: session.sessionId, bearer: session.bearer },
   }), 'utf-8').toString('base64url')
 
-  const resp2 = await fetch(url, {
-    method,
-    headers: { ...headers, Authorization: `Payment ${credential}` },
-    body,
+  // Use any session endpoint URL to send the close
+  const closeUrl = `${session.url}/api/session/fortune`
+  const resp = await fetch(closeUrl, {
+    headers: { Authorization: `Payment ${closeCred}` },
   })
 
-  const result = await resp2.text()
+  const result = await resp.text()
+  clearSession()
 
-  if (resp2.status === 200) {
-    if (!terse) {
-      console.error('')
-      console.error(`  ┌─ Payment Complete ──────────────────────────────┐`)
-      console.error(`  │ Status:  ✅ Verified`)
-      console.error(`  │ Paid:    ${challenge.amount} zat (${amountZec} ZEC)`)
-      console.error(`  │ txid:    ${txid.slice(0, 16)}...${txid.slice(-8)}`)
-      console.error(`  │ Privacy: 🔒 Fully shielded (Orchard)`)
-      console.error(`  └────────────────────────────────────────────────┘`)
-      console.error('')
-    }
-    console.log(result)
+  if (resp.status === 200) {
+    console.log(`┌─ Session Closed ─────────────────────────────────┐`)
+    console.log(`│ Session:  ${session.sessionId.padEnd(39)}│`)
+    console.log(`│ Status:   ✅ Closed (refund sent if applicable)${' '.repeat(3)}│`)
+    console.log(`└─────────────────────────────────────────────────┘`)
   } else {
-    if (!terse) console.error(`  ❌ ${resp2.status}: Payment verification failed`)
-    console.log(result)
+    console.error(`Close failed: ${result}`)
   }
+}
+
+async function handleSessionStatus(): Promise<void> {
+  const session = loadSession()
+  if (!session) {
+    console.log('No active session.')
+    return
+  }
+  console.log(`┌─ Active Session ──────────────────────────────────┐`)
+  console.log(`│ Session:  ${session.sessionId.padEnd(39)}│`)
+  console.log(`│ Server:   ${session.url.padEnd(39)}│`)
+  console.log(`│ Bearer:   ${(session.bearer.slice(0, 16) + '...' + session.bearer.slice(-8)).padEnd(39)}│`)
+  console.log(`└──────────────────────────────────────────────────┘`)
 }
 
 // ── Main dispatch ───────────────────────────────────────────────────
@@ -472,6 +621,14 @@ Examples:
 
   if (cmd === 'request') {
     return handleRequest(args.slice(1))
+  }
+
+  if (cmd === 'session') {
+    const sub = args[1]
+    if (sub === 'close') return handleSessionClose()
+    if (sub === 'status') return handleSessionStatus()
+    console.error('Usage: zimppy session [close|status]')
+    process.exit(1)
   }
 
   console.error(`Unknown command: ${cmd}. Run: zimppy --help`)
