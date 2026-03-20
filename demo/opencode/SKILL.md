@@ -50,14 +50,15 @@ Starter prompts should be user-facing tasks, for example:
 
 ```bash
 npx zimppy wallet whoami
-npx zimppy wallet services
-npx zimppy wallet services --search <query>
+npx zimppy wallet services                        # auto-discover all running services
+npx zimppy wallet services <SERVICE_URL>           # discover a specific service
+npx zimppy wallet services --add <SERVICE_URL>     # add a service to scan list
 npx zimppy request <SERVICE_URL>/<ENDPOINT_PATH>
 npx zimppy request <SERVICE_URL>/<ENDPOINT_PATH>
 ```
 
 - Select the service and endpoint that best matches user intent.
-- **Always check services first** — use `npx zimppy wallet services` to see available endpoints, pricing, and methods before making requests.
+- **Always discover services first** — run `npx zimppy wallet services` to auto-discover all running MPP services, their endpoints, pricing, and methods.
 - Build request URL as `<SERVICE_URL>/<ENDPOINT_PATH>` from the services list.
 
 ### Request Templates

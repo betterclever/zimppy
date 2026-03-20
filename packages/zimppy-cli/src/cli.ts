@@ -230,38 +230,81 @@ async function walletFund(): Promise<void> {
   console.log(`Network: ${cfg.network}`)
 }
 
+const SERVICES_FILE = join(CONFIG_DIR, 'services.json')
+const DEFAULT_SERVICE_URLS = ['http://localhost:3180', 'http://localhost:3181']
+
+function loadServiceUrls(): string[] {
+  if (existsSync(SERVICES_FILE)) {
+    try { return JSON.parse(readFileSync(SERVICES_FILE, 'utf-8')) as string[] }
+    catch { /* fall through */ }
+  }
+  return DEFAULT_SERVICE_URLS
+}
+
+function saveServiceUrls(urls: string[]): void {
+  mkdirSync(CONFIG_DIR, { recursive: true })
+  writeFileSync(SERVICES_FILE, JSON.stringify(urls, null, 2))
+}
+
 async function walletServices(args: string[]): Promise<void> {
-  let searchQuery = ''
+  // --add <url>: register a new service
+  // --remove <url>: remove a service
+  // <url>: discover a specific service
+  // (no args): scan all known services
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--search' && args[i + 1]) searchQuery = args[++i]
-    else if (!args[i].startsWith('-')) searchQuery = args[i]
+    if (args[i] === '--add' && args[i + 1]) {
+      const urls = loadServiceUrls()
+      const newUrl = args[++i].replace(/\/$/, '')
+      if (!urls.includes(newUrl)) { urls.push(newUrl); saveServiceUrls(urls) }
+      console.error(`✅ Added ${newUrl}`)
+      return
+    }
+    if (args[i] === '--remove' && args[i + 1]) {
+      const urls = loadServiceUrls()
+      const rmUrl = args[++i].replace(/\/$/, '')
+      saveServiceUrls(urls.filter(u => u !== rmUrl))
+      console.error(`✅ Removed ${rmUrl}`)
+      return
+    }
   }
 
-  // For now, show our known services
-  // In production, this would query a registry
-  const services = [
-    {
-      id: 'zimppy-fortune',
-      name: 'Zimppy Fortune Teller',
-      url: 'http://localhost:3180',
-      endpoints: [
-        { path: '/api/fortune', method: 'GET', price: '42000 zat', description: 'Get a privacy fortune' },
-        { path: '/api/session/fortune', method: 'GET', price: '5000 zat/request (session)', description: 'Fortune via prepaid session' },
-        { path: '/api/stream/fortune', method: 'GET', price: '1000 zat/word (stream)', description: 'Streamed fortune, pay per word' },
-      ],
-      discovery: 'http://localhost:3180/.well-known/payment',
-    },
-  ]
-
-  if (searchQuery) {
-    const filtered = services.filter(s =>
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.id.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-    console.log(JSON.stringify(filtered, null, 2))
-  } else {
-    console.log(JSON.stringify(services, null, 2))
+  // Single URL given — discover just that service
+  const singleUrl = args.find(a => !a.startsWith('-'))
+  if (singleUrl) {
+    const base = singleUrl.replace(/\/$/, '')
+    console.error(`🔍 ${base}/.well-known/payment`)
+    try {
+      const resp = await fetch(`${base}/.well-known/payment`, { signal: AbortSignal.timeout(5000) })
+      if (!resp.ok) { console.error(`ERROR: ${resp.status}`); process.exit(1) }
+      console.log(JSON.stringify(await resp.json(), null, 2))
+    } catch (e) { console.error(`ERROR: ${(e as Error).message}`); process.exit(1) }
+    return
   }
+
+  // No args — scan all known service URLs
+  const urls = loadServiceUrls()
+  console.error(`🔍 Scanning ${urls.length} known services...`)
+
+  const services: Record<string, unknown>[] = []
+  await Promise.all(urls.map(async (base) => {
+    try {
+      const resp = await fetch(`${base}/.well-known/payment`, { signal: AbortSignal.timeout(3000) })
+      if (resp.ok) {
+        const data = await resp.json() as Record<string, unknown>
+        services.push({ ...data, url: base })
+      }
+    } catch { /* service not reachable — skip */ }
+  }))
+
+  if (services.length === 0) {
+    console.error('No services found. Are any MPP servers running?')
+    console.error(`Checked: ${urls.join(', ')}`)
+    console.error('Add a service: npx zimppy wallet services --add http://host:port')
+    return
+  }
+
+  console.error(`Found ${services.length} service(s)`)
+  console.log(JSON.stringify(services, null, 2))
 }
 
 // ── Request command ─────────────────────────────────────────────────

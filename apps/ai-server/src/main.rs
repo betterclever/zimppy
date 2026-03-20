@@ -51,7 +51,7 @@ async fn main() {
     let rpc_endpoint = std::env::var("ZEBRAD_RPC_ENDPOINT")
         .unwrap_or_else(|_| "https://zcash-testnet-zebrad.gateway.tatum.io".to_string());
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3181);
-    let price: u64 = std::env::var("PRICE_ZAT").ok().and_then(|p| p.parse().ok()).unwrap_or(50_000);
+    let price: u64 = std::env::var("PRICE_ZAT").ok().and_then(|p| p.parse().ok()).unwrap_or(10_000);
     let secret_key = std::env::var("MPP_SECRET_KEY").unwrap_or_else(|_| "zimppy-ai-secret".to_string());
     let vibeproxy_url = std::env::var("VIBEPROXY_URL").unwrap_or_else(|_| "http://localhost:8317".to_string());
     let vibeproxy_model = std::env::var("VIBEPROXY_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
@@ -101,12 +101,14 @@ async fn main() {
         .route("/api/health", get(health))
         .route("/api/summarize", post(summarize))
         .route("/api/session/summarize", post(session_summarize))
+        .route("/api/stream/summarize", post(stream_summarize))
         .route("/.well-known/payment", get(discovery))
         .with_state(state.clone());
 
     eprintln!("  endpoints:");
-    eprintln!("    POST /api/summarize          (charge, {} zat)", price);
-    eprintln!("    POST /api/session/summarize   (session, {} zat/req)", price);
+    eprintln!("    POST /api/summarize           (charge, {} zat)", price);
+    eprintln!("    POST /api/session/summarize    (session, {} zat/req)", price);
+    eprintln!("    POST /api/stream/summarize     (stream, 1000 zat/token)");
     eprintln!("  listening on http://0.0.0.0:{port}");
     eprintln!("  discovery: http://0.0.0.0:{port}/.well-known/payment");
     eprintln!();
@@ -404,6 +406,152 @@ async fn handle_session_payment(
             problem_response(402, "Session Error", &e.to_string())
         }
     }
+}
+
+// ── SSE Streaming endpoint: POST /api/stream/summarize ────────────────
+
+async fn stream_summarize(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Option<Json<SummarizeRequest>>,
+) -> impl IntoResponse {
+    let auth = match headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+        Some(a) if a.starts_with("Payment ") => a,
+        _ => return issue_challenge(state).await,
+    };
+
+    let encoded = auth.trim_start_matches("Payment ").trim();
+    let bytes = match base64url_decode(encoded) {
+        Ok(b) => b,
+        Err(_) => return problem_response(400, "Invalid Credential", "invalid base64url"),
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return problem_response(400, "Invalid Credential", &format!("invalid JSON: {e}")),
+    };
+    let payload = match value.get("payload") {
+        Some(p) => p.clone(),
+        None => return problem_response(400, "Invalid Credential", "missing payload"),
+    };
+
+    let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("");
+    if action != "bearer" {
+        return problem_response(400, "Invalid Action", "stream requires bearer action");
+    }
+
+    let session_id = payload.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let bearer = payload.get("bearer").and_then(|b| b.as_str()).unwrap_or("");
+
+    // Verify bearer
+    let bearer_hash = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(bearer.as_bytes());
+        hex::encode(hasher.finalize())
+    };
+
+    let session_state = match state.session.get_session(&session_id) {
+        Some(s) => s,
+        None => return problem_response(402, "Session Not Found", "session not found"),
+    };
+    if session_state.bearer_hash != bearer_hash {
+        return problem_response(402, "Invalid Bearer", "invalid bearer token");
+    }
+
+    let text = match &body {
+        Some(b) => b.text.clone(),
+        None => return problem_response(400, "Missing Body", "POST body with {\"text\": \"...\"} required"),
+    };
+
+    eprintln!("[STREAM] Starting AI stream for session {session_id}");
+
+    // Call VibeProxy with streaming
+    let client = reqwest::Client::new();
+    let url = format!("{}/v1/chat/completions", state.vibeproxy_url);
+    let ai_body = serde_json::json!({
+        "model": state.vibeproxy_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a concise document summarizer. Summarize the given text in 2-4 sentences, capturing the key points. Be direct and informative."
+            },
+            {
+                "role": "user",
+                "content": format!("Summarize the following text:\n\n{text}")
+            }
+        ],
+        "max_tokens": 256,
+        "stream": false,
+    });
+
+    let ai_resp = match client.post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", "Bearer dummy-not-used")
+        .json(&ai_body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return problem_response(500, "AI Error", &format!("AI request failed: {e}")),
+    };
+
+    let ai_json: serde_json::Value = match ai_resp.json().await {
+        Ok(v) => v,
+        Err(e) => return problem_response(500, "AI Error", &format!("AI parse failed: {e}")),
+    };
+
+    let summary = ai_json
+        .pointer("/choices/0/message/content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(no summary)")
+        .to_string();
+
+    // Stream the summary word by word, deducting per token
+    let words: Vec<&str> = summary.split_whitespace().collect();
+    let tick_cost: u64 = 1000; // 1000 zat per word
+    let mut total_spent: u64 = 0;
+    let mut total_chunks: u64 = 0;
+    let mut sse_body = String::new();
+
+    for word in &words {
+        match state.session.deduct(&session_id, tick_cost) {
+            Ok(remaining) => {
+                total_spent += tick_cost;
+                total_chunks += 1;
+                let data = serde_json::json!({ "token": word, "remaining": remaining });
+                sse_body.push_str(&format!("event: message\ndata: {data}\n\n"));
+                eprintln!("[STREAM] token=\"{word}\" cost={tick_cost} remaining={remaining}");
+            }
+            Err(_) => {
+                let balance = state.session.get_session(&session_id)
+                    .map(|s| s.deposit_amount_zat.saturating_sub(s.spent_zat))
+                    .unwrap_or(0);
+                let need = serde_json::json!({
+                    "sessionId": session_id,
+                    "requiredAmount": tick_cost,
+                    "currentBalance": balance,
+                });
+                sse_body.push_str(&format!("event: payment-need-voucher\ndata: {need}\n\n"));
+                eprintln!("[STREAM] Balance exhausted after {total_chunks} tokens");
+                break;
+            }
+        }
+    }
+
+    let receipt = serde_json::json!({
+        "sessionId": session_id,
+        "totalSpent": total_spent,
+        "totalTokens": total_chunks,
+        "costPerToken": tick_cost,
+    });
+    sse_body.push_str(&format!("event: payment-receipt\ndata: {receipt}\n\n"));
+    eprintln!("[STREAM] Complete: {total_chunks} tokens, {total_spent} zat");
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/event-stream".to_string())],
+        sse_body,
+    ).into_response()
 }
 
 // ── Challenge + helpers ───────────────────────────────────────────────
