@@ -93,6 +93,25 @@ npx zimppy request --deposit 500000 http://localhost:3180/api/session/fortune
 
 ## Available Services
 
+### Zimppy AI Summarizer (http://localhost:3181)
+
+| Endpoint | Method | Price | Description |
+|---|---|---|---|
+| `/api/summarize` | POST | 50,000 zat | Summarize a document (one-time charge) |
+| `/api/session/summarize` | POST | 50,000 zat/req | Summarize via prepaid session |
+| `/api/health` | GET | Free | Health check |
+| `/.well-known/payment` | GET | Free | Service discovery |
+
+```bash
+# Summarize a document (charge)
+npx zimppy request -X POST --json '{"text": "Your document text here..."}' http://localhost:3181/api/summarize
+
+# Summarize via session (deposit once, many requests)
+npx zimppy request -X POST --json '{"text": "First doc..."}' http://localhost:3181/api/session/summarize
+npx zimppy request -X POST --json '{"text": "Second doc..."}' http://localhost:3181/api/session/summarize
+npx zimppy session close
+```
+
 ### Zimppy Fortune Teller (http://localhost:3180)
 
 | Endpoint | Method | Price | Description |
