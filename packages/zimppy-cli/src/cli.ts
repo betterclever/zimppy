@@ -1,0 +1,428 @@
+#!/usr/bin/env npx tsx
+/**
+ * zimppy — Private machine payments on Zcash
+ *
+ * A curl-compatible CLI for discovering services and calling HTTP endpoints
+ * with automatic shielded Zcash payment handling.
+ *
+ * Commands:
+ *   zimppy wallet login          Set up or configure wallet
+ *   zimppy wallet whoami         Show wallet address, balance, network
+ *   zimppy wallet balance        Show balance
+ *   zimppy wallet fund           Instructions to fund the wallet
+ *   zimppy wallet services       Discover paid services (--search <query>)
+ *   zimppy request               Make HTTP request with auto-pay
+ *   zimppy --help                Show help
+ *   zimppy --version             Show version
+ */
+
+import { execFileSync, execSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+const VERSION = '0.1.0'
+const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
+const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
+const DEFAULT_LWD = 'testnet.zec.rocks:443'
+const DEFAULT_RPC = 'https://zcash-testnet-zebrad.gateway.tatum.io'
+
+// ── Config ──────────────────────────────────────────────────────────
+
+interface ZimppyConfig {
+  walletDir: string
+  identityFile: string
+  lwdServer: string
+  rpcEndpoint: string
+  network: 'testnet' | 'mainnet'
+}
+
+function loadConfig(): ZimppyConfig | null {
+  if (!existsSync(CONFIG_FILE)) return null
+  return JSON.parse(readFileSync(CONFIG_FILE, 'utf-8')) as ZimppyConfig
+}
+
+function saveConfig(config: ZimppyConfig): void {
+  mkdirSync(CONFIG_DIR, { recursive: true })
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
+}
+
+function requireConfig(): ZimppyConfig {
+  const cfg = loadConfig()
+  if (!cfg) {
+    console.error('No wallet configured. Run: zimppy wallet login')
+    process.exit(1)
+  }
+  return cfg
+}
+
+// ── Wallet commands ─────────────────────────────────────────────────
+
+async function walletLogin(): Promise<void> {
+  console.error('Setting up Zcash wallet for zimppy...')
+
+  // Check if zcash-devtool is available
+  try {
+    execFileSync('zcash-devtool', ['--help'], { stdio: 'pipe' })
+  } catch {
+    console.error('ERROR: zcash-devtool not found.')
+    console.error('Install: cargo install --git https://github.com/zcash/zcash-devtool')
+    process.exit(1)
+  }
+
+  const walletDir = process.env.ZCASH_WALLET_DIR ?? join(CONFIG_DIR, 'wallet')
+  const identityFile = join(walletDir, 'identity.txt')
+
+  // Check if wallet already exists
+  if (existsSync(walletDir) && existsSync(identityFile)) {
+    console.error(`Wallet already exists at ${walletDir}`)
+    const config: ZimppyConfig = {
+      walletDir,
+      identityFile,
+      lwdServer: DEFAULT_LWD,
+      rpcEndpoint: DEFAULT_RPC,
+      network: 'testnet',
+    }
+    saveConfig(config)
+    console.error('Config saved.')
+    await walletWhoami()
+    return
+  }
+
+  // Point to existing wallet if env var set
+  if (process.env.ZCASH_WALLET_DIR) {
+    console.error(`Using existing wallet at ${walletDir}`)
+    const config: ZimppyConfig = {
+      walletDir,
+      identityFile,
+      lwdServer: process.env.ZCASH_LWD_SERVER ?? DEFAULT_LWD,
+      rpcEndpoint: process.env.ZCASH_RPC_ENDPOINT ?? DEFAULT_RPC,
+      network: 'testnet',
+    }
+    saveConfig(config)
+    console.error('Config saved.')
+    await walletWhoami()
+    return
+  }
+
+  console.error(`Creating new wallet at ${walletDir}...`)
+  console.error('This requires interactive input for the mnemonic phrase.')
+  console.error('Run zcash-devtool manually:')
+  console.error(`  mkdir -p ${walletDir}`)
+  console.error(`  age-keygen > ${identityFile}`)
+  console.error(`  zcash-devtool wallet -w ${walletDir} init --name zimppy -i ${identityFile} --network test --server ${DEFAULT_LWD} --connection direct --birthday 3906900`)
+  console.error('')
+  console.error('Then run: zimppy wallet login')
+}
+
+async function walletWhoami(): Promise<void> {
+  const cfg = requireConfig()
+  console.error('Syncing wallet...')
+
+  try {
+    execFileSync('zcash-devtool', [
+      'wallet', '-w', cfg.walletDir, 'sync',
+      '--server', cfg.lwdServer, '--connection', 'direct',
+    ], { stdio: 'pipe' })
+  } catch {
+    console.error('Sync failed — lightwalletd may be unavailable')
+  }
+
+  try {
+    const addr = execFileSync('zcash-devtool', [
+      'wallet', '-w', cfg.walletDir, 'list-addresses',
+    ], { stdio: 'pipe' }).toString().trim()
+
+    const bal = execFileSync('zcash-devtool', [
+      'wallet', '-w', cfg.walletDir, 'balance',
+    ], { stdio: 'pipe' }).toString().trim()
+
+    console.log(JSON.stringify({
+      address: addr.split('\n').find((l: string) => l.includes('utest1') || l.includes('u1'))?.trim() ?? addr,
+      balance: bal,
+      network: cfg.network,
+      wallet: cfg.walletDir,
+      ready: true,
+    }, null, 2))
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+  }
+}
+
+async function walletBalance(): Promise<void> {
+  const cfg = requireConfig()
+  try {
+    execFileSync('zcash-devtool', [
+      'wallet', '-w', cfg.walletDir, 'sync',
+      '--server', cfg.lwdServer, '--connection', 'direct',
+    ], { stdio: 'pipe' })
+    const bal = execFileSync('zcash-devtool', [
+      'wallet', '-w', cfg.walletDir, 'balance',
+    ], { stdio: 'pipe' }).toString().trim()
+    console.log(bal)
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+  }
+}
+
+async function walletFund(): Promise<void> {
+  const cfg = requireConfig()
+  console.log('To fund your zimppy wallet:')
+  console.log('')
+  console.log('1. Visit https://testnet.zecfaucet.com/')
+  console.log('2. Or ask someone to send testnet ZEC to your address')
+  console.log('3. Run: zimppy wallet whoami   (to see your address)')
+  console.log('')
+  console.log(`Wallet: ${cfg.walletDir}`)
+  console.log(`Network: ${cfg.network}`)
+}
+
+async function walletServices(args: string[]): Promise<void> {
+  let searchQuery = ''
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--search' && args[i + 1]) searchQuery = args[++i]
+    else if (!args[i].startsWith('-')) searchQuery = args[i]
+  }
+
+  // For now, show our known services
+  // In production, this would query a registry
+  const services = [
+    {
+      id: 'zimppy-fortune',
+      name: 'Zimppy Fortune Teller',
+      url: 'http://localhost:3180',
+      endpoints: [
+        { path: '/api/fortune', method: 'GET', price: '42000 zat', description: 'Get a privacy fortune' },
+        { path: '/api/session/fortune', method: 'GET', price: '5000 zat/request (session)', description: 'Fortune via prepaid session' },
+        { path: '/api/stream/fortune', method: 'GET', price: '1000 zat/word (stream)', description: 'Streamed fortune, pay per word' },
+      ],
+      discovery: 'http://localhost:3180/.well-known/payment',
+    },
+  ]
+
+  if (searchQuery) {
+    const filtered = services.filter(s =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.id.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    console.log(JSON.stringify(filtered, null, 2))
+  } else {
+    console.log(JSON.stringify(services, null, 2))
+  }
+}
+
+// ── Request command ─────────────────────────────────────────────────
+
+async function handleRequest(args: string[]): Promise<void> {
+  const cfg = requireConfig()
+
+  // Parse curl-like args
+  let method = 'GET'
+  let body: string | undefined
+  let url = ''
+  let terse = false
+  let dryRun = false
+  const headers: Record<string, string> = {}
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-X' && args[i + 1]) method = args[++i]
+    else if (args[i] === '--json' && args[i + 1]) { body = args[++i]; method = method === 'GET' ? 'POST' : method }
+    else if (args[i] === '-H' && args[i + 1]) { const [k, ...v] = args[++i].split(':'); headers[k.trim()] = v.join(':').trim() }
+    else if (args[i] === '-t') terse = true
+    else if (args[i] === '--dry-run') dryRun = true
+    else if (args[i] === '-m' && args[i + 1]) { i++ } // timeout, ignore for now
+    else if (!args[i].startsWith('-')) url = args[i]
+  }
+
+  if (!url) {
+    console.error('Usage: zimppy request [-t] [--dry-run] [-X METHOD] [--json \'...\'] <URL>')
+    process.exit(1)
+  }
+
+  if (body) headers['content-type'] = 'application/json'
+
+  if (dryRun) {
+    console.error(`[dry-run] ${method} ${url}`)
+    if (body) console.error(`[dry-run] Body: ${body}`)
+    return
+  }
+
+  if (!terse) console.error(`→ ${method} ${url}`)
+
+  // First request
+  const resp1 = await fetch(url, { method, headers, body })
+
+  if (resp1.status !== 402) {
+    if (!terse) console.error(`← ${resp1.status}`)
+    console.log(await resp1.text())
+    return
+  }
+
+  if (!terse) console.error('← 402 Payment Required')
+
+  // Parse challenge
+  const wwwAuth = resp1.headers.get('www-authenticate') ?? ''
+  const requestMatch = wwwAuth.match(/request="([^"]+)"/)
+  if (!requestMatch) {
+    console.error('ERROR: No payment challenge found')
+    process.exit(1)
+  }
+
+  const padded = requestMatch[1] + '=='.slice(0, (4 - (requestMatch[1].length % 4)) % 4)
+  const challenge = JSON.parse(Buffer.from(padded, 'base64url').toString('utf-8')) as {
+    challengeId: string; amount: string; recipient: string; memo: string
+  }
+
+  if (!terse) {
+    console.error(`  Amount: ${challenge.amount} zat`)
+    console.error(`  Recipient: ${challenge.recipient.slice(0, 30)}...`)
+    console.error(`  Memo: ${challenge.memo}`)
+    console.error('')
+    console.error('→ Paying with Zcash (shielded)...')
+  }
+
+  // Sync wallet
+  try {
+    execFileSync('zcash-devtool', [
+      'wallet', '-w', cfg.walletDir, 'sync',
+      '--server', cfg.lwdServer, '--connection', 'direct',
+    ], { stdio: 'pipe' })
+  } catch { /* ignore sync errors */ }
+
+  // Send payment
+  if (!terse) console.error('  Sending transaction...')
+  let txid: string
+  try {
+    const out = execFileSync('zcash-devtool', [
+      'wallet', '-w', cfg.walletDir, 'send',
+      '-i', cfg.identityFile,
+      '--server', cfg.lwdServer, '--connection', 'direct',
+      '--address', challenge.recipient,
+      '--value', challenge.amount,
+      '--memo', challenge.memo,
+    ], { stdio: 'pipe' }).toString()
+
+    txid = out.split('\n').find(l => l.length === 64 && /^[a-f0-9]+$/.test(l)) ?? ''
+    if (!txid) {
+      console.error('ERROR: No txid in send output')
+      console.error(out)
+      process.exit(1)
+    }
+  } catch (e) {
+    console.error(`ERROR: Send failed: ${(e as Error).message}`)
+    process.exit(1)
+  }
+
+  if (!terse) console.error(`  Broadcast: ${txid.slice(0, 20)}...`)
+
+  // Wait for confirmation
+  if (!terse) console.error('  Waiting for confirmation...')
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 15000))
+    if (!terse) process.stderr.write('.')
+    try {
+      const resp = await fetch(cfg.rpcEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'getrawtransaction', params: [txid, 1], id: 1 }),
+      })
+      const data = await resp.json() as { result?: { confirmations?: number } }
+      if (data.result?.confirmations && data.result.confirmations > 0) {
+        if (!terse) console.error(`\n  Confirmed! ${data.result.confirmations} confirmations`)
+        break
+      }
+    } catch { /* keep polling */ }
+  }
+
+  // Retry with credential
+  if (!terse) console.error('→ Retrying with credential...')
+
+  const credential = Buffer.from(JSON.stringify({
+    payload: { txid, challengeId: challenge.challengeId },
+  }), 'utf-8').toString('base64url')
+
+  const resp2 = await fetch(url, {
+    method,
+    headers: { ...headers, Authorization: `Payment ${credential}` },
+    body,
+  })
+
+  if (!terse) console.error(`← ${resp2.status}`)
+  const result = await resp2.text()
+  console.log(result)
+
+  const receipt = resp2.headers.get('payment-receipt')
+  if (receipt && !terse) {
+    console.error(`  Receipt: ${receipt.slice(0, 80)}...`)
+  }
+}
+
+// ── Main dispatch ───────────────────────────────────────────────────
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2)
+  const cmd = args[0]
+
+  if (!cmd || cmd === '--help' || cmd === 'help') {
+    console.log(`zimppy v${VERSION} — Private machine payments on Zcash
+
+Commands:
+  zimppy wallet login            Set up wallet
+  zimppy wallet whoami           Show address + balance + network
+  zimppy wallet balance          Show balance
+  zimppy wallet fund             How to add funds
+  zimppy wallet services         List available paid services
+  zimppy wallet services --search <query>  Search services
+  zimppy request <URL>           Make HTTP request with auto-pay
+  zimppy request -t <URL>        Terse output (agent-friendly)
+  zimppy request --dry-run <URL> Show what would be sent
+  zimppy --version               Show version
+
+Request options:
+  -X METHOD        HTTP method (default: GET)
+  --json '{...}'   Send JSON body (implies POST)
+  -H 'Key: Val'    Add header
+  -t               Terse/compact output for agents
+  --dry-run        Show request without sending
+  -m <seconds>     Timeout
+
+Examples:
+  zimppy wallet whoami
+  zimppy wallet services --search fortune
+  zimppy request http://localhost:3180/api/fortune
+  zimppy request -t -X GET http://localhost:3180/api/fortune`)
+    return
+  }
+
+  if (cmd === '--version' || cmd === '-v') {
+    console.log(VERSION)
+    return
+  }
+
+  if (cmd === 'wallet') {
+    const sub = args[1]
+    switch (sub) {
+      case 'login': return walletLogin()
+      case 'whoami': return walletWhoami()
+      case 'balance': return walletBalance()
+      case 'fund': return walletFund()
+      case 'services': return walletServices(args.slice(2))
+      default:
+        console.error(`Unknown wallet command: ${sub}`)
+        console.error('Available: login, whoami, balance, fund, services')
+        process.exit(1)
+    }
+  }
+
+  if (cmd === 'request') {
+    return handleRequest(args.slice(1))
+  }
+
+  console.error(`Unknown command: ${cmd}. Run: zimppy --help`)
+  process.exit(1)
+}
+
+main().catch((e) => {
+  console.error(`ERROR: ${(e as Error).message}`)
+  process.exit(1)
+})
