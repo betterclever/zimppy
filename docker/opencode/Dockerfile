@@ -1,25 +1,23 @@
-FROM golang:1.24-bookworm AS builder
+FROM ghcr.io/anomalyco/opencode
 
-RUN go install github.com/opencode-ai/opencode@latest
+USER root
 
-FROM node:22-bookworm-slim
+# Install Node.js on Alpine
+RUN apk add --no-cache nodejs npm
 
-# Install opencode
-COPY --from=builder /go/bin/opencode /usr/local/bin/opencode
-
-# Install project deps
+# Copy our MCP server and deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/ packages/
 COPY apps/mcp-server/ apps/mcp-server/
-COPY apps/demo/ apps/demo/
 COPY config/ config/
 COPY crates/zimppy-napi/ crates/zimppy-napi/
+COPY SKILL.md ./
 RUN npm install --ignore-scripts 2>/dev/null || npm install
 
 # OpenCode config
-COPY docker/opencode/opencode.json /app/opencode.json
+RUN mkdir -p /root/.config/opencode
+COPY docker/opencode/opencode.json /root/.config/opencode/opencode.json
 
-ENV TERM=xterm-256color
-
+WORKDIR /workspace
 ENTRYPOINT ["opencode"]
