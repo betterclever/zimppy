@@ -137,13 +137,23 @@ async function walletWhoami(): Promise<void> {
       'wallet', '-w', cfg.walletDir, 'balance',
     ], { stdio: 'pipe' }).toString().trim()
 
-    console.log(JSON.stringify({
-      address: addr.split('\n').find((l: string) => l.includes('utest1') || l.includes('u1'))?.trim() ?? addr,
-      balance: bal,
-      network: cfg.network,
-      wallet: cfg.walletDir,
-      ready: true,
-    }, null, 2))
+    const addrLine = addr.split('\n').find((l: string) => l.includes('utest1') || l.includes('u1'))?.trim() ?? addr
+    const address = addrLine.replace(/^.*?Address:\s*/, '').trim()
+    const shortAddr = address.length > 50 ? `${address.slice(0, 25)}...${address.slice(-15)}` : address
+
+    const lines = bal.split('\n').map((l: string) => l.trim()).filter(Boolean)
+    const total = lines.find((l: string) => l.startsWith('Balance:'))?.replace('Balance:', '').trim() ?? '?'
+    const orchard = lines.find((l: string) => l.includes('Orchard Spendable'))?.split(':')[1]?.trim() ?? '0'
+    const height = lines.find((l: string) => l.includes('Height:'))?.split(':')[1]?.trim() ?? '?'
+
+    console.log(`┌─ Zimppy Wallet ──────────────────────────────────┐`)
+    console.log(`│ Address:  ${shortAddr.padEnd(40)}│`)
+    console.log(`│ Balance:  ${total.padEnd(40)}│`)
+    console.log(`│ Orchard:  ${orchard.padEnd(40)}│`)
+    console.log(`│ Network:  ${cfg.network.padEnd(40)}│`)
+    console.log(`│ Height:   ${height.padEnd(40)}│`)
+    console.log(`│ Status:   ✅ Ready${' '.repeat(31)}│`)
+    console.log(`└──────────────────────────────────────────────────┘`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
   }
