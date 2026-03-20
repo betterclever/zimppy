@@ -152,14 +152,30 @@ async function walletWhoami(): Promise<void> {
 async function walletBalance(): Promise<void> {
   const cfg = requireConfig()
   try {
+    process.stderr.write('Syncing...')
     execFileSync('zcash-devtool', [
       'wallet', '-w', cfg.walletDir, 'sync',
       '--server', cfg.lwdServer, '--connection', 'direct',
     ], { stdio: 'pipe' })
+    process.stderr.write(' done\n')
     const bal = execFileSync('zcash-devtool', [
       'wallet', '-w', cfg.walletDir, 'balance',
     ], { stdio: 'pipe' }).toString().trim()
-    console.log(bal)
+
+    // Parse balance lines
+    const lines = bal.split('\n').map((l: string) => l.trim()).filter(Boolean)
+    const total = lines.find((l: string) => l.startsWith('Balance:'))?.replace('Balance:', '').trim() ?? '?'
+    const orchard = lines.find((l: string) => l.includes('Orchard Spendable'))?.split(':')[1]?.trim() ?? '0'
+    const sapling = lines.find((l: string) => l.includes('Sapling Spendable'))?.split(':')[1]?.trim() ?? '0'
+    const transparent = lines.find((l: string) => l.includes('Unshielded Spendable'))?.split(':')[1]?.trim() ?? '0'
+
+    console.log(`┌─ Wallet Balance ─────────────────────────┐`)
+    console.log(`│ Total:       ${total.padEnd(28)}│`)
+    console.log(`│ Orchard:     ${orchard.padEnd(28)}│`)
+    console.log(`│ Sapling:     ${sapling.padEnd(28)}│`)
+    console.log(`│ Transparent: ${transparent.padEnd(28)}│`)
+    console.log(`│ Network:     ${cfg.network.padEnd(28)}│`)
+    console.log(`└──────────────────────────────────────────┘`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
   }
@@ -273,24 +289,32 @@ async function handleRequest(args: string[]): Promise<void> {
     challengeId: string; amount: string; recipient: string; memo: string
   }
 
+  const amountZec = (Number(challenge.amount) / 100_000_000).toFixed(8)
   if (!terse) {
-    console.error(`  Amount: ${challenge.amount} zat`)
-    console.error(`  Recipient: ${challenge.recipient.slice(0, 30)}...`)
-    console.error(`  Memo: ${challenge.memo}`)
     console.error('')
-    console.error('→ Paying with Zcash (shielded)...')
+    console.error(`  ┌─ Payment Challenge ─────────────────────────────┐`)
+    console.error(`  │ Amount:    ${challenge.amount} zat (${amountZec} ZEC)`)
+    console.error(`  │ Recipient: ${challenge.recipient.slice(0, 40)}...`)
+    console.error(`  │ Memo:      ${challenge.memo.slice(0, 40)}...`)
+    console.error(`  └────────────────────────────────────────────────┘`)
+    console.error('')
+    console.error('  🔒 Sending shielded Zcash payment...')
   }
 
   // Sync wallet
+  if (!terse) process.stderr.write('  ⏳ Syncing wallet...')
   try {
     execFileSync('zcash-devtool', [
       'wallet', '-w', cfg.walletDir, 'sync',
       '--server', cfg.lwdServer, '--connection', 'direct',
     ], { stdio: 'pipe' })
-  } catch { /* ignore sync errors */ }
+    if (!terse) console.error(' done')
+  } catch {
+    if (!terse) console.error(' (skipped)')
+  }
 
   // Send payment
-  if (!terse) console.error('  Sending transaction...')
+  if (!terse) process.stderr.write('  📡 Broadcasting transaction...')
   let txid: string
   try {
     const out = execFileSync('zcash-devtool', [
@@ -304,22 +328,31 @@ async function handleRequest(args: string[]): Promise<void> {
 
     txid = out.split('\n').find(l => l.length === 64 && /^[a-f0-9]+$/.test(l)) ?? ''
     if (!txid) {
+      console.error(' FAILED')
       console.error('ERROR: No txid in send output')
       console.error(out)
       process.exit(1)
     }
   } catch (e) {
+    console.error(' FAILED')
     console.error(`ERROR: Send failed: ${(e as Error).message}`)
     process.exit(1)
   }
 
-  if (!terse) console.error(`  Broadcast: ${txid.slice(0, 20)}...`)
+  if (!terse) {
+    console.error(' done')
+    console.error(`  📦 txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
+    console.error('')
+  }
 
-  // Wait for confirmation
-  if (!terse) console.error('  Waiting for confirmation...')
+  // Wait for confirmation with progress
+  if (!terse) console.error('  ⛏️  Waiting for Zcash block confirmation...')
+  const startTime = Date.now()
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 15000))
-    if (!terse) process.stderr.write('.')
+    const elapsed = Math.round((Date.now() - startTime) / 1000)
+    const bar = '█'.repeat(Math.min(i + 1, 10)) + '░'.repeat(Math.max(10 - i - 1, 0))
+    if (!terse) process.stderr.write(`\r  ⛏️  [${bar}] ${elapsed}s elapsed...`)
     try {
       const resp = await fetch(cfg.rpcEndpoint, {
         method: 'POST',
@@ -328,14 +361,17 @@ async function handleRequest(args: string[]): Promise<void> {
       })
       const data = await resp.json() as { result?: { confirmations?: number } }
       if (data.result?.confirmations && data.result.confirmations > 0) {
-        if (!terse) console.error(`\n  Confirmed! ${data.result.confirmations} confirmations`)
+        const totalTime = Math.round((Date.now() - startTime) / 1000)
+        if (!terse) {
+          console.error(`\r  ✅ Confirmed in ${totalTime}s (${data.result.confirmations} confirmations)          `)
+        }
         break
       }
     } catch { /* keep polling */ }
   }
 
   // Retry with credential
-  if (!terse) console.error('→ Retrying with credential...')
+  if (!terse) console.error('  🔄 Retrying with payment credential...')
 
   const credential = Buffer.from(JSON.stringify({
     payload: { txid, challengeId: challenge.challengeId },
@@ -347,13 +383,23 @@ async function handleRequest(args: string[]): Promise<void> {
     body,
   })
 
-  if (!terse) console.error(`← ${resp2.status}`)
   const result = await resp2.text()
-  console.log(result)
 
-  const receipt = resp2.headers.get('payment-receipt')
-  if (receipt && !terse) {
-    console.error(`  Receipt: ${receipt.slice(0, 80)}...`)
+  if (resp2.status === 200) {
+    if (!terse) {
+      console.error('')
+      console.error(`  ┌─ Payment Complete ──────────────────────────────┐`)
+      console.error(`  │ Status:  ✅ Verified`)
+      console.error(`  │ Paid:    ${challenge.amount} zat (${amountZec} ZEC)`)
+      console.error(`  │ txid:    ${txid.slice(0, 16)}...${txid.slice(-8)}`)
+      console.error(`  │ Privacy: 🔒 Fully shielded (Orchard)`)
+      console.error(`  └────────────────────────────────────────────────┘`)
+      console.error('')
+    }
+    console.log(result)
+  } else {
+    if (!terse) console.error(`  ❌ ${resp2.status}: Payment verification failed`)
+    console.log(result)
   }
 }
 
