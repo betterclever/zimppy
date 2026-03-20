@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "zimppy": {
+      "type": "local",
+      "command": ["npx", "tsx", "/app/apps/mcp-server/src/server.ts"],
+      "environment": {
+        "SERVER_WALLET_CONFIG": "/app/config/server-wallet.json",
+        "ZCASH_RPC_ENDPOINT": "https://zcash-testnet-zebrad.gateway.tatum.io"
+      },
+      "timeout": 10000
+    }
+  }
+}
