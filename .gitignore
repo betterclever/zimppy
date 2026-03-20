@@ -8,7 +8,4 @@ target/
 *.node
 packages/zimppy-ts/index.d.ts
 
-# Factory.ai artifacts
-.factory/validation/
 .omx/
-demo/
