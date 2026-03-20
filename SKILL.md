@@ -53,7 +53,7 @@ npx zimppy wallet whoami
 npx zimppy wallet services
 npx zimppy wallet services --search <query>
 npx zimppy request <SERVICE_URL>/<ENDPOINT_PATH>
-npx zimppy request -t <SERVICE_URL>/<ENDPOINT_PATH>
+npx zimppy request <SERVICE_URL>/<ENDPOINT_PATH>
 ```
 
 - Select the service and endpoint that best matches user intent.
@@ -66,14 +66,14 @@ npx zimppy request -t <SERVICE_URL>/<ENDPOINT_PATH>
 # GET request (most common)
 npx zimppy request http://localhost:3180/api/fortune
 
-# GET with terse output (agent-friendly, less noise)
-npx zimppy request -t http://localhost:3180/api/fortune
-
 # Dry run (show what would be sent without paying)
 npx zimppy request --dry-run http://localhost:3180/api/fortune
 
 # POST with JSON body
 npx zimppy request -X POST --json '{"city":"Tokyo"}' http://localhost:3180/api/weather
+
+# Session with custom deposit (default: 10x per-request price)
+npx zimppy request --deposit 500000 http://localhost:3180/api/session/fortune
 ```
 
 ### Response Handling
@@ -87,8 +87,8 @@ npx zimppy request -X POST --json '{"city":"Tokyo"}' http://localhost:3180/api/w
 
 - Always discover endpoints before making requests; never guess paths.
 - `npx zimppy request` is curl-compatible for common flags (-X, --json, -H).
-- Use `-t` for agent calls to keep output compact.
 - Use `--dry-run` before potentially expensive requests.
+- Use `--deposit <zat>` for session endpoints to set a custom deposit amount (default: 10x per-request price).
 - Payment confirmation takes ~75 seconds (1 Zcash block). Be patient and inform the user.
 
 ## Available Services

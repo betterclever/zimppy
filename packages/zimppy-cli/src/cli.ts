@@ -173,14 +173,14 @@ async function walletWhoami(): Promise<void> {
     const orchard = lines.find((l: string) => l.includes('Orchard Spendable'))?.split(':')[1]?.trim() ?? '0'
     const height = lines.find((l: string) => l.includes('Height:'))?.split(':')[1]?.trim() ?? '?'
 
-    console.log(`┌─ Zimppy Wallet ──────────────────────────────────┐`)
-    console.log(`│ Address:  ${shortAddr.padEnd(40)}│`)
-    console.log(`│ Balance:  ${total.padEnd(40)}│`)
-    console.log(`│ Orchard:  ${orchard.padEnd(40)}│`)
-    console.log(`│ Network:  ${cfg.network.padEnd(40)}│`)
-    console.log(`│ Height:   ${height.padEnd(40)}│`)
-    console.log(`│ Status:   ✅ Ready${' '.repeat(31)}│`)
-    console.log(`└──────────────────────────────────────────────────┘`)
+    console.log(`--- Zimppy Wallet ---`)
+    console.log(`  Address:  ${shortAddr}`)
+    console.log(`  Balance:  ${total}`)
+    console.log(`  Orchard:  ${orchard}`)
+    console.log(`  Network:  ${cfg.network}`)
+    console.log(`  Height:   ${height}`)
+    console.log(`  Status:   Ready`)
+    console.log(`---`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
   }
@@ -206,13 +206,13 @@ async function walletBalance(): Promise<void> {
     const sapling = lines.find((l: string) => l.includes('Sapling Spendable'))?.split(':')[1]?.trim() ?? '0'
     const transparent = lines.find((l: string) => l.includes('Unshielded Spendable'))?.split(':')[1]?.trim() ?? '0'
 
-    console.log(`┌─ Wallet Balance ─────────────────────────┐`)
-    console.log(`│ Total:       ${total.padEnd(28)}│`)
-    console.log(`│ Orchard:     ${orchard.padEnd(28)}│`)
-    console.log(`│ Sapling:     ${sapling.padEnd(28)}│`)
-    console.log(`│ Transparent: ${transparent.padEnd(28)}│`)
-    console.log(`│ Network:     ${cfg.network.padEnd(28)}│`)
-    console.log(`└──────────────────────────────────────────┘`)
+    console.log(`--- Wallet Balance ---`)
+    console.log(`  Total:       ${total}`)
+    console.log(`  Orchard:     ${orchard}`)
+    console.log(`  Sapling:     ${sapling}`)
+    console.log(`  Transparent: ${transparent}`)
+    console.log(`  Network:     ${cfg.network}`)
+    console.log(`---`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
   }
@@ -273,22 +273,22 @@ async function handleRequest(args: string[]): Promise<void> {
   let method = 'GET'
   let body: string | undefined
   let url = ''
-  let terse = false
   let dryRun = false
+  let depositOverride: number | undefined
   const headers: Record<string, string> = {}
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-X' && args[i + 1]) method = args[++i]
     else if (args[i] === '--json' && args[i + 1]) { body = args[++i]; method = method === 'GET' ? 'POST' : method }
     else if (args[i] === '-H' && args[i + 1]) { const [k, ...v] = args[++i].split(':'); headers[k.trim()] = v.join(':').trim() }
-    else if (args[i] === '-t') terse = true
     else if (args[i] === '--dry-run') dryRun = true
+    else if (args[i] === '--deposit' && args[i + 1]) { depositOverride = Number(args[++i]) }
     else if (args[i] === '-m' && args[i + 1]) { i++ } // timeout, ignore for now
     else if (!args[i].startsWith('-')) url = args[i]
   }
 
   if (!url) {
-    console.error('Usage: zimppy request [-t] [--dry-run] [-X METHOD] [--json \'...\'] <URL>')
+    console.error('Usage: zimppy request [--dry-run] [--deposit <zat>] [-X METHOD] [--json \'...\'] <URL>')
     process.exit(1)
   }
 
@@ -300,13 +300,13 @@ async function handleRequest(args: string[]): Promise<void> {
     return
   }
 
-  if (!terse) console.error(`→ ${method} ${url}`)
+  console.error(`→ ${method} ${url}`)
 
   // Check if we have an active session for this URL's base
   const baseUrl = new URL(url).origin
   const session = loadSession()
   if (session && session.url === baseUrl) {
-    if (!terse) console.error(`  🎫 Using active session: ${session.sessionId}`)
+    console.error(`  🎫 Using active session: ${session.sessionId}`)
     const bearerCred = Buffer.from(JSON.stringify({
       payload: { action: 'bearer', sessionId: session.sessionId, bearer: session.bearer },
     }), 'utf-8').toString('base64url')
@@ -318,12 +318,12 @@ async function handleRequest(args: string[]): Promise<void> {
     })
 
     if (sessionResp.status === 200) {
-      if (!terse) console.error(`  ✅ Session bearer accepted`)
+      console.error(`  ✅ Session bearer accepted`)
       console.log(await sessionResp.text())
       return
     }
     // Session might be expired/closed — fall through to regular flow
-    if (!terse) console.error(`  ⚠️  Session bearer rejected (${sessionResp.status}), falling back to new payment`)
+    console.error(`  ⚠️  Session bearer rejected (${sessionResp.status}), falling back to new payment`)
     clearSession()
   }
 
@@ -331,12 +331,12 @@ async function handleRequest(args: string[]): Promise<void> {
   const resp1 = await fetch(url, { method, headers, body })
 
   if (resp1.status !== 402) {
-    if (!terse) console.error(`← ${resp1.status}`)
+    console.error(`← ${resp1.status}`)
     console.log(await resp1.text())
     return
   }
 
-  if (!terse) console.error('← 402 Payment Required')
+  console.error('← 402 Payment Required')
 
   // Parse challenge
   const wwwAuth = resp1.headers.get('www-authenticate') ?? ''
@@ -351,32 +351,43 @@ async function handleRequest(args: string[]): Promise<void> {
     challengeId: string; amount: string; recipient: string; memo: string
   }
 
-  const amountZec = (Number(challenge.amount) / 100_000_000).toFixed(8)
-  if (!terse) {
-    console.error('')
-    console.error(`  ┌─ Payment Challenge ─────────────────────────────┐`)
-    console.error(`  │ Amount:    ${challenge.amount} zat (${amountZec} ZEC)`)
-    console.error(`  │ Recipient: ${challenge.recipient.slice(0, 40)}...`)
-    console.error(`  │ Memo:      ${challenge.memo.slice(0, 40)}...`)
-    console.error(`  └────────────────────────────────────────────────┘`)
-    console.error('')
-    console.error('  🔒 Sending shielded Zcash payment...')
+  // For session endpoints, deposit more than a single request's worth
+  const isSessionEndpoint = url.includes('/session/') || url.includes('/stream/')
+  const perRequestZat = Number(challenge.amount)
+  const depositMultiplier = 10
+  const sendAmountZat = isSessionEndpoint
+    ? (depositOverride ?? perRequestZat * depositMultiplier)
+    : perRequestZat
+  const sendAmount = String(sendAmountZat)
+  const amountZec = (sendAmountZat / 100_000_000).toFixed(8)
+  console.error('')
+  console.error(`  --- Payment Challenge ---`)
+  if (isSessionEndpoint) {
+    console.error(`  Per-req:   ${challenge.amount} zat`)
+    console.error(`  Deposit:   ${sendAmount} zat (${amountZec} ZEC) [${depositOverride ? 'custom' : `${depositMultiplier}x`}]`)
+  } else {
+    console.error(`  Amount:    ${sendAmount} zat (${amountZec} ZEC)`)
   }
+  console.error(`  Recipient: ${challenge.recipient.slice(0, 40)}...`)
+  console.error(`  Memo:      ${challenge.memo.slice(0, 40)}...`)
+  console.error(`  ---`)
+  console.error('')
+  console.error('  🔒 Sending shielded Zcash payment...')
 
   // Sync wallet
-  if (!terse) process.stderr.write('  ⏳ Syncing wallet...')
+  process.stderr.write('  ⏳ Syncing wallet...')
   try {
     execFileSync('zcash-devtool', [
       'wallet', '-w', cfg.walletDir, 'sync',
       '--server', cfg.lwdServer, '--connection', 'direct',
     ], { stdio: 'pipe' })
-    if (!terse) console.error(' done')
+    console.error(' done')
   } catch {
-    if (!terse) console.error(' (skipped)')
+    console.error(' (skipped)')
   }
 
   // Send payment
-  if (!terse) process.stderr.write('  📡 Broadcasting transaction...')
+  process.stderr.write('  📡 Broadcasting transaction...')
   let txid: string
   try {
     const out = execFileSync('zcash-devtool', [
@@ -384,7 +395,7 @@ async function handleRequest(args: string[]): Promise<void> {
       '-i', cfg.identityFile,
       '--server', cfg.lwdServer, '--connection', 'direct',
       '--address', challenge.recipient,
-      '--value', challenge.amount,
+      '--value', sendAmount,
       '--memo', challenge.memo,
     ], { stdio: 'pipe' }).toString()
 
@@ -401,20 +412,18 @@ async function handleRequest(args: string[]): Promise<void> {
     process.exit(1)
   }
 
-  if (!terse) {
-    console.error(' done')
-    console.error(`  📦 txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
-    console.error('')
-  }
+  console.error(' done')
+  console.error(`  📦 txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
+  console.error('')
 
   // Wait for confirmation with progress
-  if (!terse) console.error('  ⛏️  Waiting for Zcash block confirmation...')
+  console.error('  ⛏️  Waiting for Zcash block confirmation (~75s)...')
   const startTime = Date.now()
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 15000))
     const elapsed = Math.round((Date.now() - startTime) / 1000)
     const bar = '█'.repeat(Math.min(i + 1, 10)) + '░'.repeat(Math.max(10 - i - 1, 0))
-    if (!terse) process.stderr.write(`\r  ⛏️  [${bar}] ${elapsed}s elapsed...`)
+    process.stderr.write(`\r  ⛏️  [${bar}] ${elapsed}s elapsed...`)
     try {
       const resp = await fetch(cfg.rpcEndpoint, {
         method: 'POST',
@@ -424,20 +433,15 @@ async function handleRequest(args: string[]): Promise<void> {
       const data = await resp.json() as { result?: { confirmations?: number } }
       if (data.result?.confirmations && data.result.confirmations > 0) {
         const totalTime = Math.round((Date.now() - startTime) / 1000)
-        if (!terse) {
-          console.error(`\r  ✅ Confirmed in ${totalTime}s (${data.result.confirmations} confirmations)          `)
-        }
+        console.error(`\r  ✅ Confirmed in ${totalTime}s (${data.result.confirmations} confirmations)          `)
         break
       }
     } catch { /* keep polling */ }
   }
 
-  // Determine if this is a session endpoint
-  const isSessionEndpoint = url.includes('/session/') || url.includes('/stream/')
-
   if (isSessionEndpoint) {
     // Open a session with the deposit txid
-    if (!terse) console.error('  🎫 Opening session with deposit...')
+    console.error('  🎫 Opening session with deposit...')
     const openCred = Buffer.from(JSON.stringify({
       payload: { action: 'open', depositTxid: txid, refundAddress: cfg.walletDir },
     }), 'utf-8').toString('base64url')
@@ -451,23 +455,21 @@ async function handleRequest(args: string[]): Promise<void> {
 
     if (openResp.status === 200 && openResult.sessionId) {
       saveSession({ sessionId: openResult.sessionId, bearer: txid, url: baseUrl })
-      if (!terse) {
-        console.error(`  ✅ Session opened: ${openResult.sessionId}`)
-        console.error('')
-        console.error(`  ┌─ Session Active ─────────────────────────────────┐`)
-        console.error(`  │ Session:  ${openResult.sessionId.padEnd(39)}│`)
-        console.error(`  │ Deposit:  ${challenge.amount} zat (${amountZec} ZEC)${''.padEnd(Math.max(0, 22 - amountZec.length))}│`)
-        console.error(`  │ Privacy:  🔒 Fully shielded (Orchard)${''.padEnd(12)}│`)
-        console.error(`  │ Next:     Bearer requests are instant! ${''.padEnd(10)}│`)
-        console.error(`  └─────────────────────────────────────────────────┘`)
-        console.error('')
-      }
+      console.error(`  ✅ Session opened: ${openResult.sessionId}`)
+      console.error('')
+      console.error(`  --- Session Active ---`)
+      console.error(`  Session:  ${openResult.sessionId}`)
+      console.error(`  Deposit:  ${sendAmount} zat (${amountZec} ZEC)`)
+      console.error(`  Privacy:  🔒 Fully shielded (Orchard)`)
+      console.error(`  Next:     Bearer requests are instant!`)
+      console.error(`  ---`)
+      console.error('')
       // If the open also returned content (fortune), show it
       if (openResult.fortune) {
         console.log(JSON.stringify(openResult))
       } else {
         // Make a bearer request to get actual content
-        if (!terse) console.error('  🎫 Fetching content via bearer...')
+        console.error('  🎫 Fetching content via bearer...')
         const bearerCred = Buffer.from(JSON.stringify({
           payload: { action: 'bearer', sessionId: openResult.sessionId, bearer: txid },
         }), 'utf-8').toString('base64url')
@@ -479,11 +481,11 @@ async function handleRequest(args: string[]): Promise<void> {
         console.log(await contentResp.text())
       }
     } else {
-      if (!terse) console.error(`  ❌ Session open failed: ${JSON.stringify(openResult)}`)
+      console.error(`  ❌ Session open failed: ${JSON.stringify(openResult)}`)
     }
   } else {
     // Regular charge flow — retry with credential
-    if (!terse) console.error('  🔄 Retrying with payment credential...')
+    console.error('  🔄 Retrying with payment credential...')
 
     const credential = Buffer.from(JSON.stringify({
       payload: { txid, challengeId: challenge.challengeId },
@@ -498,19 +500,17 @@ async function handleRequest(args: string[]): Promise<void> {
     const result = await resp2.text()
 
     if (resp2.status === 200) {
-      if (!terse) {
-        console.error('')
-        console.error(`  ┌─ Payment Complete ──────────────────────────────┐`)
-        console.error(`  │ Status:  ✅ Verified`)
-        console.error(`  │ Paid:    ${challenge.amount} zat (${amountZec} ZEC)`)
-        console.error(`  │ txid:    ${txid.slice(0, 16)}...${txid.slice(-8)}`)
-        console.error(`  │ Privacy: 🔒 Fully shielded (Orchard)`)
-        console.error(`  └────────────────────────────────────────────────┘`)
-        console.error('')
-      }
+      console.error('')
+      console.error(`  --- Payment Complete ---`)
+      console.error(`  ✅ Status:  Verified`)
+      console.error(`  💰 Paid:    ${sendAmount} zat (${amountZec} ZEC)`)
+      console.error(`  📦 txid:    ${txid.slice(0, 16)}...${txid.slice(-8)}`)
+      console.error(`  🔒 Privacy: Fully shielded (Orchard)`)
+      console.error(`  ---`)
+      console.error('')
       console.log(result)
     } else {
-      if (!terse) console.error(`  ❌ ${resp2.status}: Payment verification failed`)
+      console.error(`  ❌ ${resp2.status}: Payment verification failed`)
       console.log(result)
     }
   }
@@ -557,11 +557,11 @@ async function handleSessionClose(): Promise<void> {
       if (body.refundTxid) refundInfo = `${(body.refundTxid as string).slice(0, 16)}...`
     } catch { /* not json */ }
 
-    console.log(`┌─ Session Closed ─────────────────────────────────┐`)
-    console.log(`│ Session:  ${session.sessionId.padEnd(39)}│`)
-    console.log(`│ Refund:   ${refundInfo.padEnd(39)}│`)
-    console.log(`│ Status:   ✅ Closed${' '.repeat(30)}│`)
-    console.log(`└─────────────────────────────────────────────────┘`)
+    console.log(`--- Session Closed ---`)
+    console.log(`  Session:  ${session.sessionId}`)
+    console.log(`  Refund:   ${refundInfo}`)
+    console.log(`  Status:   Closed`)
+    console.log(`---`)
   } else {
     console.error(`Close failed: ${resultText}`)
   }
@@ -573,11 +573,11 @@ async function handleSessionStatus(): Promise<void> {
     console.log('No active session.')
     return
   }
-  console.log(`┌─ Active Session ──────────────────────────────────┐`)
-  console.log(`│ Session:  ${session.sessionId.padEnd(39)}│`)
-  console.log(`│ Server:   ${session.url.padEnd(39)}│`)
-  console.log(`│ Bearer:   ${(session.bearer.slice(0, 16) + '...' + session.bearer.slice(-8)).padEnd(39)}│`)
-  console.log(`└──────────────────────────────────────────────────┘`)
+  console.log(`--- Active Session ---`)
+  console.log(`  Session:  ${session.sessionId}`)
+  console.log(`  Server:   ${session.url}`)
+  console.log(`  Bearer:   ${session.bearer.slice(0, 16)}...${session.bearer.slice(-8)}`)
+  console.log(`---`)
 }
 
 // ── Main dispatch ───────────────────────────────────────────────────

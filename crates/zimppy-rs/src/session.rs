@@ -307,8 +307,14 @@ impl ZcashSessionMethod {
                 match send {
                     Ok(output) => {
                         let stdout = String::from_utf8_lossy(&output.stdout);
-                        let txid = stdout.lines()
-                            .find(|l| l.len() == 64 && l.chars().all(|c| c.is_ascii_hexdigit()))
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        eprintln!("[session:close] send stdout: {stdout}");
+                        eprintln!("[session:close] send stderr: {stderr}");
+                        // zcash-devtool may output txid on stdout or stderr
+                        let all_output = format!("{stdout}\n{stderr}");
+                        let txid = all_output.lines()
+                            .find(|l| l.trim().len() == 64 && l.trim().chars().all(|c| c.is_ascii_hexdigit()))
+                            .map(|l| l.trim())
                             .unwrap_or("unknown");
                         eprintln!("[session:close] Refund sent: {txid}");
                         actual_refund_txid = Some(txid.to_string());
