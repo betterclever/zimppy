@@ -222,6 +222,8 @@ async fn handle_session_payment(state: Arc<AppState>, auth_str: &str) -> axum::r
                         "status": "ok",
                         "sessionId": result.session_id,
                         "action": result.action,
+                        "refundTxid": result.refund_txid,
+                        "refundAmountZat": result.refund_amount_zat,
                     })),
                 )
                     .into_response()

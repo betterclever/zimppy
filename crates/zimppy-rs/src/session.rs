@@ -170,7 +170,7 @@ impl ZcashSessionMethod {
 
         eprintln!("[session:open] Created session {session_id}, deposit={deposit_amount}, charged={charge_amount_zat}");
 
-        Ok(SessionVerifyResult {
+        Ok(SessionVerifyResult { refund_txid: None, refund_amount_zat: None,
             session_id,
             action: "open".to_string(),
             is_management: true,
@@ -209,7 +209,7 @@ impl ZcashSessionMethod {
         let new_remaining = state.deposit_amount_zat.saturating_sub(state.spent_zat);
         eprintln!("[session:bearer] {session_id}: charged {charge_amount_zat}, remaining {new_remaining}");
 
-        Ok(SessionVerifyResult {
+        Ok(SessionVerifyResult { refund_txid: None, refund_amount_zat: None,
             session_id: session_id.to_string(),
             action: "bearer".to_string(),
             is_management: false,
@@ -251,7 +251,7 @@ impl ZcashSessionMethod {
         let new_remaining = state.deposit_amount_zat.saturating_sub(state.spent_zat);
         eprintln!("[session:topUp] {session_id}: added {top_up_amount}, new balance {new_remaining}");
 
-        Ok(SessionVerifyResult {
+        Ok(SessionVerifyResult { refund_txid: None, refund_amount_zat: None,
             session_id: session_id.to_string(),
             action: "topUp".to_string(),
             is_management: true,
@@ -282,19 +282,17 @@ impl ZcashSessionMethod {
         let refund_amount = state.deposit_amount_zat.saturating_sub(state.spent_zat);
         eprintln!("[session:close] {session_id}: refund={refund_amount} to {}", &state.refund_address[..20.min(state.refund_address.len())]);
 
+        let mut actual_refund_txid: Option<String> = None;
+
         if refund_amount > 0 {
             if let Some(ref cfg) = self.refund_config {
                 eprintln!("[session:close] Sending refund of {refund_amount} zat...");
 
-                let sync = Command::new("zcash-devtool")
+                let _sync = Command::new("zcash-devtool")
                     .args(["wallet", "-w", &cfg.wallet_dir, "sync",
                            "--server", &cfg.lightwalletd_server,
                            "--connection", "direct"])
                     .output();
-
-                if let Err(e) = &sync {
-                    eprintln!("[session:close] Sync failed: {e}");
-                }
 
                 let send = Command::new("zcash-devtool")
                     .args(["wallet", "-w", &cfg.wallet_dir, "send",
@@ -313,6 +311,7 @@ impl ZcashSessionMethod {
                             .find(|l| l.len() == 64 && l.chars().all(|c| c.is_ascii_hexdigit()))
                             .unwrap_or("unknown");
                         eprintln!("[session:close] Refund sent: {txid}");
+                        actual_refund_txid = Some(txid.to_string());
                     }
                     Err(e) => {
                         eprintln!("[session:close] Refund send failed: {e}");
@@ -327,6 +326,8 @@ impl ZcashSessionMethod {
         eprintln!("[session:close] {session_id} closed. Total spent: {}", state.spent_zat);
 
         Ok(SessionVerifyResult {
+            refund_txid: actual_refund_txid,
+            refund_amount_zat: Some(refund_amount),
             session_id: session_id.to_string(),
             action: "close".to_string(),
             is_management: true,
@@ -362,6 +363,8 @@ pub struct SessionVerifyResult {
     pub session_id: String,
     pub action: String,
     pub is_management: bool,
+    pub refund_txid: Option<String>,
+    pub refund_amount_zat: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

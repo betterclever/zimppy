@@ -536,16 +536,34 @@ async function handleSessionClose(): Promise<void> {
     headers: { Authorization: `Payment ${closeCred}` },
   })
 
-  const result = await resp.text()
+  const resultText = await resp.text()
   clearSession()
 
   if (resp.status === 200) {
+    // Check server logs via receipt header for refund info
+    const receiptHeader = resp.headers.get('payment-receipt') ?? ''
+    let refundInfo = 'none (fully spent)'
+    try {
+      const padded = receiptHeader + '=='.slice(0, (4 - (receiptHeader.length % 4)) % 4)
+      const receipt = JSON.parse(Buffer.from(padded, 'base64url').toString('utf-8')) as Record<string, unknown>
+      if (receipt.refundTxid) {
+        refundInfo = `${(receipt.refundTxid as string).slice(0, 16)}...`
+      }
+    } catch { /* no receipt */ }
+
+    // Also try parsing the JSON body for session close details
+    try {
+      const body = JSON.parse(resultText) as Record<string, unknown>
+      if (body.refundTxid) refundInfo = `${(body.refundTxid as string).slice(0, 16)}...`
+    } catch { /* not json */ }
+
     console.log(`┌─ Session Closed ─────────────────────────────────┐`)
     console.log(`│ Session:  ${session.sessionId.padEnd(39)}│`)
-    console.log(`│ Status:   ✅ Closed (refund sent if applicable)${' '.repeat(3)}│`)
+    console.log(`│ Refund:   ${refundInfo.padEnd(39)}│`)
+    console.log(`│ Status:   ✅ Closed${' '.repeat(30)}│`)
     console.log(`└─────────────────────────────────────────────────┘`)
   } else {
-    console.error(`Close failed: ${result}`)
+    console.error(`Close failed: ${resultText}`)
   }
 }
 
