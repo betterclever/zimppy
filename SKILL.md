@@ -95,13 +95,20 @@ npx zimppy request -X POST --json '{"city":"Tokyo"}' http://localhost:3180/api/w
 
 ### Zimppy Fortune Teller (http://localhost:3180)
 
+**Use `zimppy request` with these endpoints:**
+
 | Endpoint | Method | Price | Description |
 |---|---|---|---|
-| `/api/fortune` | GET | 42,000 zat | Get a privacy fortune (one-time charge) |
-| `/api/session/fortune` | GET | 5,000 zat/req | Fortune via prepaid session |
-| `/api/stream/fortune` | GET | 1,000 zat/word | Streamed fortune, pay per word |
+| `/api/fortune` | GET | 10,000 zat | Get a privacy fortune (one-time charge) |
 | `/api/health` | GET | Free | Health check |
 | `/.well-known/payment` | GET | Free | Service discovery |
+
+**Always use `/api/fortune` for paid requests.** Do NOT use `/api/session/fortune` or `/api/stream/fortune` directly — those require session management which `zimppy request` does not handle.
+
+Example:
+```bash
+npx zimppy request http://localhost:3180/api/fortune
+```
 
 ## Common Issues
 
