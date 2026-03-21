@@ -208,7 +208,7 @@ export function zcashSessionServer(options: ZcashSessionServerOptions) {
     const chargeAmount = Number(request.amount)
 
     return withSessionLock(sessionId, async () => {
-      const state = await store.get<SessionState>(`zcash-session:${sessionId}`)
+      const state = await store.get(`zcash-session:${sessionId}`) as SessionState | null
       if (!state) throw new Error('session not found')
       if (state.status !== 'active') throw new Error(`session is ${state.status}`)
 
@@ -246,7 +246,7 @@ export function zcashSessionServer(options: ZcashSessionServerOptions) {
     const consumedKey = `zcash-session:topup-consumed:${topUpTxid}`
 
     return withSessionLock(sessionId, async () => {
-      const state = await store.get<SessionState>(`zcash-session:${sessionId}`)
+      const state = await store.get(`zcash-session:${sessionId}`) as SessionState | null
       if (!state) throw new Error('session not found')
       if (state.status !== 'active') throw new Error(`session is ${state.status}`)
 
@@ -291,7 +291,7 @@ export function zcashSessionServer(options: ZcashSessionServerOptions) {
     const { sessionId, bearer } = payload
 
     return withSessionLock(sessionId, async () => {
-      const state = await store.get<SessionState>(`zcash-session:${sessionId}`)
+      const state = await store.get(`zcash-session:${sessionId}`) as SessionState | null
       if (!state) throw new Error('session not found')
       if (state.status === 'closed') throw new Error('session already closed')
 

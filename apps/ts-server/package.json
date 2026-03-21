@@ -8,7 +8,7 @@
     "start": "tsx src/server.ts"
   },
   "dependencies": {
-    "mppx": "^0.4.7",
+    "mppx": "^0.4.8",
     "zimppy-ts": "*"
   }
 }
