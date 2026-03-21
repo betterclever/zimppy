@@ -483,51 +483,57 @@ async fn stream_summarize(
     };
 
     // Stream the summary word by word, deducting per token
-    let words: Vec<&str> = summary.split_whitespace().collect();
+    let words: Vec<String> = summary.split_whitespace().map(String::from).collect();
     let tick_cost: u64 = state.stream_tick_cost_zat;
-    let mut total_spent: u64 = 0;
-    let mut total_chunks: u64 = 0;
-    let mut sse_body = String::new();
 
-    for word in &words {
-        match state.session.deduct(&session_id, tick_cost) {
-            Ok(remaining) => {
-                total_spent += tick_cost;
-                total_chunks += 1;
-                let data = serde_json::json!({ "token": word, "remaining": remaining });
-                sse_body.push_str(&format!("event: message\ndata: {data}\n\n"));
-                eprintln!("[STREAM] token=\"{word}\" cost={tick_cost} remaining={remaining}");
-            }
-            Err(_) => {
-                let balance = state.session.get_session(&session_id)
-                    .map(|s| s.deposit_amount_zat.saturating_sub(s.spent_zat))
-                    .unwrap_or(0);
-                let need = serde_json::json!({
-                    "sessionId": session_id,
-                    "requiredAmount": tick_cost,
-                    "currentBalance": balance,
-                });
-                sse_body.push_str(&format!("event: payment-need-voucher\ndata: {need}\n\n"));
-                eprintln!("[STREAM] Balance exhausted after {total_chunks} tokens");
-                break;
+    let stream = async_stream::stream! {
+        let mut total_spent: u64 = 0;
+        let mut total_chunks: u64 = 0;
+
+        for word in &words {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+            match state.session.deduct(&session_id, tick_cost) {
+                Ok(remaining) => {
+                    total_spent += tick_cost;
+                    total_chunks += 1;
+                    let data = serde_json::json!({ "token": word, "remaining": remaining });
+                    eprintln!("[STREAM] token=\"{word}\" cost={tick_cost} remaining={remaining}");
+                    yield Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default()
+                        .event("message")
+                        .data(data.to_string()));
+                }
+                Err(_) => {
+                    let balance = state.session.get_session(&session_id)
+                        .map(|s| s.deposit_amount_zat.saturating_sub(s.spent_zat))
+                        .unwrap_or(0);
+                    let need = serde_json::json!({
+                        "sessionId": session_id,
+                        "requiredAmount": tick_cost,
+                        "currentBalance": balance,
+                    });
+                    eprintln!("[STREAM] Balance exhausted after {total_chunks} tokens");
+                    yield Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default()
+                        .event("payment-need-voucher")
+                        .data(need.to_string()));
+                    break;
+                }
             }
         }
-    }
 
-    let receipt = serde_json::json!({
-        "sessionId": session_id,
-        "totalSpent": total_spent,
-        "totalTokens": total_chunks,
-        "costPerToken": tick_cost,
-    });
-    sse_body.push_str(&format!("event: payment-receipt\ndata: {receipt}\n\n"));
-    eprintln!("[STREAM] Complete: {total_chunks} tokens, {total_spent} zat");
+        let receipt = serde_json::json!({
+            "sessionId": session_id,
+            "totalSpent": total_spent,
+            "totalTokens": total_chunks,
+            "costPerToken": tick_cost,
+        });
+        eprintln!("[STREAM] Complete: {total_chunks} tokens, {total_spent} zat");
+        yield Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default()
+            .event("payment-receipt")
+            .data(receipt.to_string()));
+    };
 
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/event-stream".to_string())],
-        sse_body,
-    ).into_response()
+    axum::response::sse::Sse::new(stream).into_response()
 }
 
 // ── Challenge + helpers ───────────────────────────────────────────────

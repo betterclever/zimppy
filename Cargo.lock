@@ -8278,6 +8278,7 @@ dependencies = [
 name = "zimppy-ai-server"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "axum",
  "chrono",
  "hex",
@@ -8344,6 +8345,7 @@ dependencies = [
 name = "zimppy-rust-server"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "axum",
  "chrono",
  "hex",

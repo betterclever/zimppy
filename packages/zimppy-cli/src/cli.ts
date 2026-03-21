@@ -25,19 +25,39 @@ const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
 const SESSION_FILE = join(CONFIG_DIR, 'session.json')
-const DEFAULT_LWD = 'testnet.zec.rocks:443'
+const DEFAULT_LWD = 'https://testnet.zec.rocks'
 const DEFAULT_RPC = 'https://zcash-testnet-zebrad.gateway.tatum.io'
 const DEFAULT_DEPOSIT = '100000' // 100,000 zat default session deposit
+
+// ── Wallet binary ──────────────────────────────────────────────────
+
+function walletBin(): string {
+  // Check for compiled binary in the workspace
+  for (const candidate of [
+    join(__dirname, '..', '..', '..', 'target', 'debug', 'zimppy-wallet'),
+    join(__dirname, '..', '..', '..', 'target', 'release', 'zimppy-wallet'),
+  ]) {
+    if (existsSync(candidate)) return candidate
+  }
+  // Fall back to PATH
+  return 'zimppy-wallet'
+}
+
+function walletExec(args: string[], dataDir: string): string {
+  return execFileSync(walletBin(), args, {
+    stdio: 'pipe',
+    env: { ...process.env, ZIMPPY_WALLET_DIR: dataDir, ZIMPPY_LWD_ENDPOINT: process.env.ZIMPPY_LWD_ENDPOINT ?? DEFAULT_LWD },
+  }).toString().trim()
+}
 
 // ── Config ──────────────────────────────────────────────────────────
 
 interface ZimppyConfig {
-  walletDir: string
-  identityFile: string
+  dataDir: string
   lwdServer: string
   rpcEndpoint: string
   network: 'testnet' | 'mainnet'
-  address?: string  // cached unified address for refunds
+  address?: string  // cached unified address
 }
 
 function loadConfig(): ZimppyConfig | null {
@@ -95,24 +115,13 @@ function clearSession(): void {
 async function walletLogin(): Promise<void> {
   console.error('Setting up Zcash wallet for zimppy...')
 
-  // Check if zcash-devtool is available
-  try {
-    execFileSync('zcash-devtool', ['--help'], { stdio: 'pipe' })
-  } catch {
-    console.error('ERROR: zcash-devtool not found.')
-    console.error('Install: cargo install --git https://github.com/zcash/zcash-devtool')
-    process.exit(1)
-  }
-
-  const walletDir = process.env.ZCASH_WALLET_DIR ?? join(CONFIG_DIR, 'wallet')
-  const identityFile = join(walletDir, 'identity.txt')
+  const dataDir = process.env.ZIMPPY_WALLET_DIR ?? join(CONFIG_DIR, 'wallet')
 
   // Check if wallet already exists
-  if (existsSync(walletDir) && existsSync(identityFile)) {
-    console.error(`Wallet already exists at ${walletDir}`)
+  if (existsSync(join(dataDir, 'zingo-wallet.dat'))) {
+    console.error(`Wallet already exists at ${dataDir}`)
     const config: ZimppyConfig = {
-      walletDir,
-      identityFile,
+      dataDir,
       lwdServer: DEFAULT_LWD,
       rpcEndpoint: DEFAULT_RPC,
       network: 'testnet',
@@ -123,56 +132,60 @@ async function walletLogin(): Promise<void> {
     return
   }
 
-  // Point to existing wallet if env var set
-  if (process.env.ZCASH_WALLET_DIR) {
-    console.error(`Using existing wallet at ${walletDir}`)
-    const config: ZimppyConfig = {
-      walletDir,
-      identityFile,
-      lwdServer: process.env.ZCASH_LWD_SERVER ?? DEFAULT_LWD,
-      rpcEndpoint: process.env.ZCASH_RPC_ENDPOINT ?? DEFAULT_RPC,
-      network: 'testnet',
-    }
-    saveConfig(config)
-    console.error('Config saved.')
-    await walletWhoami()
-    return
+  // Need seed phrase to create wallet
+  console.error('Create a new wallet or restore from seed phrase.')
+  console.error('')
+  console.error('To create a new wallet, provide a BIP39 mnemonic:')
+  console.error(`  npx zimppy wallet init "your 24 word seed phrase here"`)
+  console.error('')
+  console.error('To generate a new seed phrase, use any BIP39 tool.')
+}
+
+async function walletInit(args: string[]): Promise<void> {
+  const phrase = args[0]
+  if (!phrase) {
+    console.error('Usage: zimppy wallet init "your 24 word seed phrase"')
+    console.error('')
+    console.error('Optional: zimppy wallet init "seed phrase" <birthday_height>')
+    process.exit(1)
   }
 
-  console.error(`Creating new wallet at ${walletDir}...`)
-  console.error('This requires interactive input for the mnemonic phrase.')
-  console.error('Run zcash-devtool manually:')
-  console.error(`  mkdir -p ${walletDir}`)
-  console.error(`  age-keygen > ${identityFile}`)
-  console.error(`  zcash-devtool wallet -w ${walletDir} init --name zimppy -i ${identityFile} --network test --server ${DEFAULT_LWD} --connection direct --birthday 3906900`)
-  console.error('')
-  console.error('Then run: zimppy wallet login')
+  const birthday = args[1] ?? '3906900'
+  const dataDir = process.env.ZIMPPY_WALLET_DIR ?? join(CONFIG_DIR, 'wallet')
+
+  console.error('Creating wallet from seed phrase...')
+  try {
+    const out = walletExec(['init', phrase, birthday], dataDir)
+    console.error(out)
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+    process.exit(1)
+  }
+
+  const config: ZimppyConfig = {
+    dataDir,
+    lwdServer: DEFAULT_LWD,
+    rpcEndpoint: DEFAULT_RPC,
+    network: 'testnet',
+  }
+  saveConfig(config)
+  console.error('Config saved.')
+  await walletWhoami()
 }
 
 async function walletWhoami(): Promise<void> {
   const cfg = requireConfig()
-  console.error('Syncing wallet...')
 
   try {
-    execFileSync('zcash-devtool', [
-      'wallet', '-w', cfg.walletDir, 'sync',
-      '--server', cfg.lwdServer, '--connection', 'direct',
-    ], { stdio: 'pipe' })
+    process.stderr.write('Syncing wallet...')
+    walletExec(['sync'], cfg.dataDir)
+    console.error(' done')
   } catch {
-    console.error('Sync failed — lightwalletd may be unavailable')
+    console.error(' (skipped)')
   }
 
   try {
-    const addr = execFileSync('zcash-devtool', [
-      'wallet', '-w', cfg.walletDir, 'list-addresses',
-    ], { stdio: 'pipe' }).toString().trim()
-
-    const bal = execFileSync('zcash-devtool', [
-      'wallet', '-w', cfg.walletDir, 'balance',
-    ], { stdio: 'pipe' }).toString().trim()
-
-    const addrLine = addr.split('\n').find((l: string) => l.includes('utest1') || l.includes('u1'))?.trim() ?? addr
-    const address = addrLine.replace(/^.*?Address:\s*/, '').trim()
+    const address = walletExec(['address'], cfg.dataDir)
     const shortAddr = address.length > 50 ? `${address.slice(0, 25)}...${address.slice(-15)}` : address
 
     // Cache address in config for refund operations
@@ -180,17 +193,15 @@ async function walletWhoami(): Promise<void> {
       saveConfig({ ...cfg, address })
     }
 
-    const lines = bal.split('\n').map((l: string) => l.trim()).filter(Boolean)
-    const total = lines.find((l: string) => l.startsWith('Balance:'))?.replace('Balance:', '').trim() ?? '?'
-    const orchard = lines.find((l: string) => l.includes('Orchard Spendable'))?.split(':')[1]?.trim() ?? '0'
-    const height = lines.find((l: string) => l.includes('Height:'))?.split(':')[1]?.trim() ?? '?'
+    const balOutput = walletExec(['balance'], cfg.dataDir)
+    const lines = balOutput.split('\n').map((l: string) => l.trim()).filter(Boolean)
+    const spendable = lines.find((l: string) => l.startsWith('Spendable:'))?.replace('Spendable:', '').trim() ?? '0'
+    const total = lines.find((l: string) => l.startsWith('Total:'))?.replace('Total:', '').trim() ?? spendable
 
     console.log(`--- Zimppy Wallet ---`)
     console.log(`  Address:  ${shortAddr}`)
     console.log(`  Balance:  ${total}`)
-    console.log(`  Orchard:  ${orchard}`)
     console.log(`  Network:  ${cfg.network}`)
-    console.log(`  Height:   ${height}`)
     console.log(`  Status:   Ready`)
     console.log(`---`)
   } catch (e) {
@@ -202,28 +213,20 @@ async function walletBalance(): Promise<void> {
   const cfg = requireConfig()
   try {
     process.stderr.write('Syncing...')
-    execFileSync('zcash-devtool', [
-      'wallet', '-w', cfg.walletDir, 'sync',
-      '--server', cfg.lwdServer, '--connection', 'direct',
-    ], { stdio: 'pipe' })
+    walletExec(['sync'], cfg.dataDir)
     process.stderr.write(' done\n')
-    const bal = execFileSync('zcash-devtool', [
-      'wallet', '-w', cfg.walletDir, 'balance',
-    ], { stdio: 'pipe' }).toString().trim()
 
-    // Parse balance lines
-    const lines = bal.split('\n').map((l: string) => l.trim()).filter(Boolean)
-    const total = lines.find((l: string) => l.startsWith('Balance:'))?.replace('Balance:', '').trim() ?? '?'
-    const orchard = lines.find((l: string) => l.includes('Orchard Spendable'))?.split(':')[1]?.trim() ?? '0'
-    const sapling = lines.find((l: string) => l.includes('Sapling Spendable'))?.split(':')[1]?.trim() ?? '0'
-    const transparent = lines.find((l: string) => l.includes('Unshielded Spendable'))?.split(':')[1]?.trim() ?? '0'
+    const balOutput = walletExec(['balance'], cfg.dataDir)
+    const lines = balOutput.split('\n').map((l: string) => l.trim()).filter(Boolean)
+    const spendable = lines.find((l: string) => l.startsWith('Spendable:'))?.replace('Spendable:', '').trim() ?? '0'
+    const pending = lines.find((l: string) => l.startsWith('Pending:'))?.replace('Pending:', '').trim() ?? '0'
+    const total = lines.find((l: string) => l.startsWith('Total:'))?.replace('Total:', '').trim() ?? '0'
 
     console.log(`--- Wallet Balance ---`)
-    console.log(`  Total:       ${total}`)
-    console.log(`  Orchard:     ${orchard}`)
-    console.log(`  Sapling:     ${sapling}`)
-    console.log(`  Transparent: ${transparent}`)
-    console.log(`  Network:     ${cfg.network}`)
+    console.log(`  Spendable: ${spendable}`)
+    console.log(`  Pending:   ${pending}`)
+    console.log(`  Total:     ${total}`)
+    console.log(`  Network:   ${cfg.network}`)
     console.log(`---`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
@@ -238,7 +241,7 @@ async function walletFund(): Promise<void> {
   console.log('2. Or ask someone to send testnet ZEC to your address')
   console.log('3. Run: zimppy wallet whoami   (to see your address)')
   console.log('')
-  console.log(`Wallet: ${cfg.walletDir}`)
+  console.log(`Wallet: ${cfg.dataDir}`)
   console.log(`Network: ${cfg.network}`)
 }
 
@@ -432,10 +435,7 @@ async function handleRequest(args: string[]): Promise<void> {
   // Sync wallet
   process.stderr.write('  ⏳ Syncing wallet...')
   try {
-    execFileSync('zcash-devtool', [
-      'wallet', '-w', cfg.walletDir, 'sync',
-      '--server', cfg.lwdServer, '--connection', 'direct',
-    ], { stdio: 'pipe' })
+    walletExec(['sync'], cfg.dataDir)
     console.error(' done')
   } catch {
     console.error(' (skipped)')
@@ -445,16 +445,11 @@ async function handleRequest(args: string[]): Promise<void> {
   process.stderr.write('  📡 Broadcasting transaction...')
   let txid: string
   try {
-    const out = execFileSync('zcash-devtool', [
-      'wallet', '-w', cfg.walletDir, 'send',
-      '-i', cfg.identityFile,
-      '--server', cfg.lwdServer, '--connection', 'direct',
-      '--address', challenge.recipient,
-      '--value', sendAmount,
-      '--memo', challenge.memo,
-    ], { stdio: 'pipe' }).toString()
-
-    txid = out.split('\n').find(l => l.length === 64 && /^[a-f0-9]+$/.test(l)) ?? ''
+    const out = walletExec(['send', challenge.recipient, sendAmount, challenge.memo], cfg.dataDir)
+    // zimppy-wallet outputs "Sent: <txid>"
+    txid = out.split('\n').find(l => l.startsWith('Sent: '))?.replace('Sent: ', '').trim()
+      ?? out.split('\n').find(l => l.length === 64 && /^[a-f0-9]+$/.test(l))
+      ?? ''
     if (!txid) {
       console.error(' FAILED')
       console.error('ERROR: No txid in send output')
@@ -646,6 +641,7 @@ async function main(): Promise<void> {
 
 Commands:
   zimppy wallet login            Set up wallet
+  zimppy wallet init <seed>      Create wallet from seed phrase
   zimppy wallet whoami           Show address + balance + network
   zimppy wallet balance          Show balance
   zimppy wallet fund             How to add funds
@@ -678,13 +674,14 @@ Examples:
     const sub = args[1]
     switch (sub) {
       case 'login': return walletLogin()
+      case 'init': return walletInit(args.slice(2))
       case 'whoami': return walletWhoami()
       case 'balance': return walletBalance()
       case 'fund': return walletFund()
       case 'services': return walletServices(args.slice(2))
       default:
         console.error(`Unknown wallet command: ${sub}`)
-        console.error('Available: login, whoami, balance, fund, services')
+        console.error('Available: login, init, whoami, balance, fund, services')
         process.exit(1)
     }
   }
