@@ -5,7 +5,7 @@
 #
 # Requires: VibeProxy running on localhost:8317
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../.."
 
 echo "⚡ Building..."
 cargo build --bin zimppy-ai-server 2>&1 | tail -2
@@ -24,6 +24,6 @@ tmux send-keys -t ai-demo "PRICE_ZAT=10000 PORT=3181 ./target/debug/zimppy-ai-se
 # Right pane: OpenCode agent
 tmux split-window -h -t ai-demo
 sleep 2
-tmux send-keys -t ai-demo "cd $(pwd)/demo/opencode && opencode" Enter
+tmux send-keys -t ai-demo "cd $(pwd)/examples/opencode-agent && opencode" Enter
 
 tmux attach -t ai-demo

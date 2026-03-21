@@ -3,7 +3,7 @@
 #
 # Layout: server (left) | CLI client (right)
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../.."
 
 echo "⚡ Building..."
 cargo build --bin zimppy-rust-server 2>&1 | tail -2

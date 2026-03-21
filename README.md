@@ -100,14 +100,13 @@ npx zimppy request --deposit 500000 http://localhost:3180/api/session/fortune
 All demos use real Zcash testnet transactions. Each launches a tmux session with server (left) and client (right).
 
 ```bash
-# Charge: 402 → shielded payment → verified → 200
-bash demo/charge/run.sh
+# Fortune Teller — charge, session, and streaming demos
+bash examples/fortune-teller/demos/charge/run.sh
+bash examples/fortune-teller/demos/session/run.sh
+bash examples/fortune-teller/demos/stream/run.sh
 
-# Session: deposit → 3 instant requests → close with refund
-bash demo/session/run.sh
-
-# Streaming: deposit → pay-per-word fortune → refund
-bash demo/stream/run.sh
+# LLM Summarizer — AI document summarization with pay-per-token
+bash examples/llm-summarizer/demos/run.sh
 ```
 
 ## Architecture
@@ -117,21 +116,18 @@ crates/
   zimppy-core/        Zcash verification engine (Orchard decryption, replay protection)
   zimppy-napi/        NAPI-RS bindings (native Rust from Node.js)
   zimppy-rs/          Rust SDK (ChargeMethod, SessionMethod, PaymentProvider, SSE)
+  zimppy-wallet/      Native Zcash wallet (zingolib)
 packages/
   zimppy-ts/          TypeScript SDK (mppx-native, charge, session, SSE)
   zimppy-cli/         CLI with auto-pay and session management
-apps/
-  rust-server/        Rust MPP server (charge + session + stream)
-  ai-server/          AI summarizer server with Zcash micropayments
-  ts-server/          TypeScript MPP server
+examples/
+  fortune-teller/     Fortune teller MPP server + charge/session/stream demos
+  llm-summarizer/     AI summarizer server + pay-per-token demo
   mcp-server/         MCP tool server with paid AI tools
-demo/
-  charge/             One-time payment demo
-  session/            Prepaid session demo
-  stream/             SSE streaming demo
-  opencode/           AI agent demo (OpenCode + VibeProxy)
+  ts-server/          TypeScript MPP server
+  opencode-agent/     AI agent demo (OpenCode + VibeProxy)
 config/
-  server-wallet.json  Server Orchard address + IVK
+  server-wallet.example.json  Server wallet config template
 ```
 
 ## Spec Compliance

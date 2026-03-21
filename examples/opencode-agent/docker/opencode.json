@@ -33,7 +33,7 @@
   "mcp": {
     "zimppy": {
       "type": "local",
-      "command": ["node", "/app/node_modules/.bin/tsx", "/app/apps/mcp-server/src/server.ts"],
+      "command": ["node", "/app/node_modules/.bin/tsx", "/app/examples/mcp-server/src/server.ts"],
       "environment": {
         "SERVER_WALLET_CONFIG": "/app/config/server-wallet.json",
         "ZCASH_RPC_ENDPOINT": "https://zcash-testnet-zebrad.gateway.tatum.io",

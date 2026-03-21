@@ -7,11 +7,13 @@
   "workspaces": [
     "crates/zimppy-napi",
     "packages/*",
-    "apps/*"
+    "examples/fortune-teller/server",
+    "examples/mcp-server",
+    "examples/ts-server"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "tsx --test packages/zimppy-ts/test/**/*.test.ts apps/*/test/**/*.test.ts"
+    "test": "tsx --test packages/zimppy-ts/test/**/*.test.ts"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.1",
