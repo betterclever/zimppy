@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env tsx
 /**
  * zimppy — Private machine payments on Zcash
  *
@@ -16,13 +16,15 @@
  *   zimppy --version             Show version
  */
 
-import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import type { ZimppyWalletNapi } from '@zimppy/core-napi'
-import { Mppx } from 'mppx/client'
-import { zcashClient, zcashSessionClient } from 'zimppy-ts'
+
+const require = createRequire(import.meta.url)
+const { Mppx } = require('mppx/client') as typeof import('mppx/client')
+const { zcashClient, zcashSessionClient } = require('zimppy-ts') as typeof import('zimppy-ts')
 
 const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')

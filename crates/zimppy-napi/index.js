@@ -5,6 +5,6 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const { ZimppyCore } = require(join(__dirname, 'zimppy-core.darwin-arm64.node'))
+const { ZimppyCore, ZimppyWalletNapi } = require(join(__dirname, 'zimppy-core.darwin-arm64.node'))
 
-export { ZimppyCore }
+export { ZimppyCore, ZimppyWalletNapi }
