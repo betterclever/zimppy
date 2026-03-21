@@ -188,16 +188,16 @@ async fn handle_session_payment(state: Arc<AppState>, auth_str: &str) -> axum::r
 
     let bytes = match base64url_decode(encoded) {
         Ok(b) => b,
-        Err(_) => return problem_response(402, "Invalid Credential", "invalid base64url"),
+        Err(_) => return problem_response(402, "Invalid Credential", "invalid base64url", "malformed-credential"),
     };
     let value: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
-        Err(e) => return problem_response(402, "Invalid Credential", &format!("invalid JSON: {e}")),
+        Err(e) => return problem_response(402, "Invalid Credential", &format!("invalid JSON: {e}"), "malformed-credential"),
     };
 
     let payload = match value.get("payload") {
         Some(p) => p.clone(),
-        None => return problem_response(402, "Invalid Credential", "missing payload"),
+        None => return problem_response(402, "Invalid Credential", "missing payload", "malformed-credential"),
     };
 
     let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
@@ -251,7 +251,7 @@ async fn handle_session_payment(state: Arc<AppState>, auth_str: &str) -> axum::r
         }
         Err(e) => {
             eprintln!("[SESSION] ERROR: {e}");
-            problem_response(402, "Session Error", &e.to_string())
+            problem_response(402, "Session Error", &e.to_string(), "payment-required")
         }
     }
 }
@@ -271,20 +271,20 @@ async fn stream_fortune(
     let encoded = auth.trim_start_matches("Payment ").trim();
     let bytes = match base64url_decode(encoded) {
         Ok(b) => b,
-        Err(_) => return problem_response(402, "Invalid Credential", "invalid base64url"),
+        Err(_) => return problem_response(402, "Invalid Credential", "invalid base64url", "malformed-credential"),
     };
     let value: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
-        Err(e) => return problem_response(402, "Invalid Credential", &format!("invalid JSON: {e}")),
+        Err(e) => return problem_response(402, "Invalid Credential", &format!("invalid JSON: {e}"), "malformed-credential"),
     };
     let payload = match value.get("payload") {
         Some(p) => p.clone(),
-        None => return problem_response(402, "Invalid Credential", "missing payload"),
+        None => return problem_response(402, "Invalid Credential", "missing payload", "malformed-credential"),
     };
 
     let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("");
     if action != "bearer" {
-        return problem_response(400, "Invalid Action", "stream requires bearer action");
+        return problem_response(400, "Invalid Action", "stream requires bearer action", "invalid-action");
     }
 
     let session_id = payload.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
@@ -300,11 +300,11 @@ async fn stream_fortune(
 
     let session_state = match state.session.get_session(&session_id) {
         Some(s) => s,
-        None => return problem_response(402, "Session Not Found", "session not found"),
+        None => return problem_response(402, "Session Not Found", "session not found", "payment-required"),
     };
 
     if session_state.bearer_hash != bearer_hash {
-        return problem_response(402, "Invalid Bearer", "invalid bearer token");
+        return problem_response(402, "Invalid Bearer", "invalid bearer token", "payment-required");
     }
 
     eprintln!("[STREAM] Starting SSE stream for session {session_id}");
@@ -508,7 +508,7 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
         Ok(v) => v,
         Err(e) => {
             eprintln!("[AUTH] ERROR: invalid credential: {e}");
-            return problem_response(402, "Invalid Credential", &format!("invalid credential: {e}"));
+            return problem_response(402, "Invalid Credential", &format!("invalid credential: {e}"), "malformed-credential");
         }
     };
 
@@ -525,7 +525,7 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
 
     if recomputed_id != *challenge_id {
         eprintln!("[AUTH] ERROR: HMAC verification failed (recomputed={recomputed_id}, echoed={challenge_id})");
-        return problem_response(402, "Invalid Challenge", "challenge HMAC verification failed");
+        return problem_response(402, "Invalid Challenge", "challenge HMAC verification failed", "invalid-challenge");
     }
 
     eprintln!("[AUTH] HMAC verification passed (stateless)");
@@ -543,7 +543,7 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
             }
         }
         Err(_) => {
-            return problem_response(500, "Internal Error", "lock error");
+            return problem_response(500, "Internal Error", "lock error", "internal-error");
         }
     };
 
@@ -584,24 +584,24 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
                     .into_response()
             } else {
                 eprintln!("[402] Payment not verified: amount or memo mismatch");
-                problem_response(402, "Payment Not Verified", "amount or memo mismatch")
+                problem_response(402, "Payment Not Verified", "amount or memo mismatch", "verification-failed")
             }
         }
         Err(e) => {
             eprintln!("[VERIFY] ERROR: {e}");
-            problem_response(402, "Verification Failed", &e.to_string())
+            problem_response(402, "Verification Failed", &e.to_string(), "verification-failed")
         }
     }
 }
 
 /// RFC 9457 problem details response helper
-fn problem_response(status: u16, title: &str, detail: &str) -> axum::response::Response {
+fn problem_response(status: u16, title: &str, detail: &str, problem_type: &str) -> axum::response::Response {
     let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     (
         code,
         [(header::CONTENT_TYPE, PROBLEM_JSON.to_string())],
         Json(serde_json::json!({
-            "type": format!("https://paymentauth.org/problems/{}", title.to_lowercase().replace(' ', "-")),
+            "type": format!("https://paymentauth.org/problems/{problem_type}"),
             "title": title,
             "status": status,
             "detail": detail,
