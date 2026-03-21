@@ -119,7 +119,7 @@ pub async fn verify_shielded(
             if let Ok(memo_str) = std::str::from_utf8(&memo) {
                 let trimmed = memo_str.trim_end_matches('\0');
                 if let Some(payload) = trimmed.strip_prefix(MEMO_PREFIX) {
-                    if payload.contains(&req.expected_challenge_id) {
+                    if payload == req.expected_challenge_id {
                         memo_matched = true;
                     }
                 }

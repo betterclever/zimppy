@@ -90,12 +90,13 @@ impl mpp::protocol::traits::ChargeMethod for ZcashChargeMethod {
         request: &mpp::protocol::intents::ChargeRequest,
     ) -> impl std::future::Future<Output = Result<mpp::protocol::core::Receipt, mpp::protocol::traits::VerificationError>> + Send {
         let credential = credential.clone();
-        let amount: u64 = request.amount.parse().unwrap_or(0);
+        let amount_str = request.amount.clone();
         let rpc = self.rpc.clone();
         let ivk = self.orchard_ivk.clone();
         let consumed = self.consumed.clone();
 
         async move {
+            let amount: u64 = amount_str.parse().map_err(|_| mpp::protocol::traits::VerificationError::new("invalid amount"))?;
             let txid = credential.charge_payload()
                 .map(|p| p.data().to_string())
                 .map_err(|e| mpp::protocol::traits::VerificationError::new(

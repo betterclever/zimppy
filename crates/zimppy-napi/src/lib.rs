@@ -125,6 +125,7 @@ pub struct NapiWalletBalance {
 #[napi]
 pub struct ZimppyWalletNapi {
     wallet: Arc<TokioMutex<ZimppyWallet>>,
+    network_name: String,
 }
 
 #[napi]
@@ -154,8 +155,10 @@ impl ZimppyWalletNapi {
         .await
         .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))?;
 
+        let network_name = wallet.network().to_string();
         Ok(Self {
             wallet: Arc::new(TokioMutex::new(wallet)),
+            network_name,
         })
     }
 
@@ -232,6 +235,6 @@ impl ZimppyWalletNapi {
     /// Get the network name.
     #[napi]
     pub fn network(&self) -> String {
-        "testnet".to_string()
+        self.network_name.clone()
     }
 }
