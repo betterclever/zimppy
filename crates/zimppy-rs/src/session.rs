@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,8 @@ pub enum SessionPayload {
         deposit_txid: String,
         #[serde(rename = "refundAddress")]
         refund_address: String,
+        #[serde(rename = "bearerSecret", default)]
+        bearer_secret: Option<String>,
     },
     Bearer {
         #[serde(rename = "sessionId")]
@@ -65,6 +68,7 @@ pub struct ZcashSessionMethod {
     consumed: ConsumedTxids,
     sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     refund_config: Option<RefundConfig>,
+    sessions_dir: Option<PathBuf>,
 }
 
 impl ZcashSessionMethod {
@@ -76,6 +80,7 @@ impl ZcashSessionMethod {
             consumed: ConsumedTxids::new(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             refund_config: None,
+            sessions_dir: None,
         }
     }
 
@@ -87,6 +92,40 @@ impl ZcashSessionMethod {
     pub fn with_refund_config(mut self, config: RefundConfig) -> Self {
         self.refund_config = Some(config);
         self
+    }
+
+    /// Enable file-backed session persistence. Loads all existing session JSON files
+    /// from `dir` into memory on construction and writes updates on every mutation.
+    pub fn with_sessions_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        let dir = dir.into();
+        // Load existing sessions from disk into the in-memory map.
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            if let Ok(mut map) = self.sessions.lock() {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                        if let Ok(contents) = std::fs::read_to_string(&path) {
+                            if let Ok(state) = serde_json::from_str::<SessionState>(&contents) {
+                                map.insert(state.session_id.clone(), state);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.sessions_dir = Some(dir);
+        self
+    }
+
+    /// Write session state to `{sessions_dir}/{session_id}.json` if persistence is enabled.
+    fn persist_session(&self, session_id: &str, state: &SessionState) {
+        if let Some(ref dir) = self.sessions_dir {
+            let path = dir.join(format!("{session_id}.json"));
+            if let Ok(json) = serde_json::to_string_pretty(state) {
+                let _ = std::fs::create_dir_all(dir);
+                let _ = std::fs::write(&path, json);
+            }
+        }
     }
 
     pub fn method(&self) -> &str {
@@ -103,8 +142,8 @@ impl ZcashSessionMethod {
             .map_err(|e| SessionError::InvalidPayload(e.to_string()))?;
 
         match payload {
-            SessionPayload::Open { deposit_txid, refund_address } => {
-                self.handle_open(&deposit_txid, &refund_address, charge_amount_zat).await
+            SessionPayload::Open { deposit_txid, refund_address, bearer_secret } => {
+                self.handle_open(&deposit_txid, &refund_address, bearer_secret.as_deref(), charge_amount_zat).await
             }
             SessionPayload::Bearer { session_id, bearer } => {
                 self.handle_bearer(&session_id, &bearer, charge_amount_zat)
@@ -122,6 +161,7 @@ impl ZcashSessionMethod {
         &self,
         deposit_txid: &str,
         refund_address: &str,
+        bearer_secret: Option<&str>,
         charge_amount_zat: u64,
     ) -> Result<SessionVerifyResult, SessionError> {
         eprintln!("[session:open] Verifying deposit txid={}...", &deposit_txid[..16.min(deposit_txid.len())]);
@@ -153,7 +193,12 @@ impl ZcashSessionMethod {
             &deposit_txid[..8.min(deposit_txid.len())]
         );
 
-        let bearer_hash = sha256_hex(deposit_txid);
+        let bearer_hash = if let Some(secret) = bearer_secret {
+            sha256_hex(secret)
+        } else {
+            eprintln!("[session:open] WARNING: no bearerSecret provided, falling back to txid-based bearer (insecure)");
+            sha256_hex(deposit_txid)
+        };
 
         let state = SessionState {
             session_id: session_id.clone(),
@@ -166,8 +211,9 @@ impl ZcashSessionMethod {
         };
 
         if let Ok(mut sessions) = self.sessions.lock() {
-            sessions.insert(session_id.clone(), state);
+            sessions.insert(session_id.clone(), state.clone());
         }
+        self.persist_session(&session_id, &state);
 
         eprintln!("[session:open] Created session {session_id}, deposit={deposit_amount}, charged={charge_amount_zat}");
 
@@ -209,6 +255,9 @@ impl ZcashSessionMethod {
         state.spent_zat += charge_amount_zat;
         let new_remaining = state.deposit_amount_zat.saturating_sub(state.spent_zat);
         eprintln!("[session:bearer] {session_id}: charged {charge_amount_zat}, remaining {new_remaining}");
+        let state_snapshot = state.clone();
+        drop(sessions);
+        self.persist_session(session_id, &state_snapshot);
 
         Ok(SessionVerifyResult { refund_txid: None, refund_amount_zat: None,
             session_id: session_id.to_string(),
@@ -251,6 +300,9 @@ impl ZcashSessionMethod {
         state.deposit_amount_zat += top_up_amount;
         let new_remaining = state.deposit_amount_zat.saturating_sub(state.spent_zat);
         eprintln!("[session:topUp] {session_id}: added {top_up_amount}, new balance {new_remaining}");
+        let state_snapshot = state.clone();
+        drop(sessions);
+        self.persist_session(session_id, &state_snapshot);
 
         Ok(SessionVerifyResult { refund_txid: None, refund_amount_zat: None,
             session_id: session_id.to_string(),
@@ -266,7 +318,7 @@ impl ZcashSessionMethod {
     ) -> Result<SessionVerifyResult, SessionError> {
         // Collect everything we need from the lock in a non-async block,
         // so the MutexGuard is dropped before any .await point.
-        let (refund_amount, cfg_clone, refund_addr, sid) = {
+        let (refund_amount, cfg_clone, refund_addr, sid, closing_snapshot) = {
             let mut sessions = self.sessions.lock()
                 .map_err(|_| SessionError::LockError)?;
 
@@ -286,8 +338,10 @@ impl ZcashSessionMethod {
             let refund_amount = state.deposit_amount_zat.saturating_sub(state.spent_zat);
             eprintln!("[session:close] {session_id}: refund={refund_amount} to {}", &state.refund_address[..20.min(state.refund_address.len())]);
 
-            (refund_amount, self.refund_config.clone(), state.refund_address.clone(), session_id.to_string())
+            let closing_snapshot = state.clone();
+            (refund_amount, self.refund_config.clone(), state.refund_address.clone(), session_id.to_string(), closing_snapshot)
         }; // MutexGuard dropped here
+        self.persist_session(&sid, &closing_snapshot);
 
         let actual_refund_txid = if refund_amount > 0 {
             if let Some(ref cfg) = cfg_clone {
@@ -318,6 +372,9 @@ impl ZcashSessionMethod {
 
         state.status = SessionStatus::Closed;
         eprintln!("[session:close] {session_id} closed. Total spent: {}", state.spent_zat);
+        let closed_snapshot = state.clone();
+        drop(sessions);
+        self.persist_session(&sid, &closed_snapshot);
 
         Ok(SessionVerifyResult {
             refund_txid: actual_refund_txid,
@@ -347,7 +404,11 @@ impl ZcashSessionMethod {
             return Err(SessionError::InsufficientBalance { needed: amount_zat, available: remaining });
         }
         state.spent_zat += amount_zat;
-        Ok(state.deposit_amount_zat.saturating_sub(state.spent_zat))
+        let remaining = state.deposit_amount_zat.saturating_sub(state.spent_zat);
+        let state_snapshot = state.clone();
+        drop(sessions);
+        self.persist_session(session_id, &state_snapshot);
+        Ok(remaining)
     }
 }
 

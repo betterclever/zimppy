@@ -10,7 +10,7 @@
  * Mirrors the solana-mpp session pattern.
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { Credential, Method, Receipt, Store, z } from 'mppx'
 import type { NapiCryptoClient } from './crypto-client.js'
 
@@ -32,6 +32,7 @@ export const sessionCredentialPayloadSchema = z.discriminatedUnion('action', [
     action: z.literal('open'),
     depositTxid: z.string(),
     refundAddress: z.string(),
+    bearerSecret: z.string(),
   }),
   z.object({
     action: z.literal('bearer'),
@@ -145,10 +146,10 @@ export function zcashSession(options: ZcashSessionServerOptions) {
   })
 
   async function handleOpen(
-    payload: { depositTxid: string; refundAddress: string },
+    payload: { depositTxid: string; refundAddress: string; bearerSecret: string },
     request: z.output<typeof sessionRequestSchema>,
   ): Promise<Receipt.Receipt> {
-    const { depositTxid, refundAddress } = payload
+    const { depositTxid, refundAddress, bearerSecret } = payload
     const consumedKey = `zcash-session:consumed:${depositTxid}`
 
     // Replay guard
@@ -177,7 +178,7 @@ export function zcashSession(options: ZcashSessionServerOptions) {
 
     // Create session
     const sessionId = `zs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const bearerHash = sha256hex(depositTxid)
+    const bearerHash = sha256hex(bearerSecret)
 
     const state: SessionState = {
       sessionId,
@@ -411,8 +412,9 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
         memo: memo ?? '',
       })
 
-      // The deposit txid IS the bearer secret
-      activeSession = { sessionId: '', bearer: depositTxid }
+      // Generate a cryptographically random bearer secret (never exposed on-chain)
+      const bearerSecret = randomBytes(32).toString('hex')
+      activeSession = { sessionId: '', bearer: bearerSecret }
 
       return Credential.serialize(Credential.from({
         challenge,
@@ -420,6 +422,7 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
           action: 'open' as const,
           depositTxid,
           refundAddress: options.refundAddress,
+          bearerSecret,
         },
       }))
     },
