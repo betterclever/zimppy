@@ -122,6 +122,8 @@ packages/
   zimppy-cli/         CLI with auto-pay and session management
 apps/
   rust-server/        Rust MPP server (charge + session + stream)
+  ai-server/          AI summarizer server with Zcash micropayments
+  ts-server/          TypeScript MPP server
   mcp-server/         MCP tool server with paid AI tools
 demo/
   charge/             One-time payment demo
@@ -130,17 +132,6 @@ demo/
   opencode/           AI agent demo (OpenCode + VibeProxy)
 config/
   server-wallet.json  Server Orchard address + IVK
-```
-
-## Server Wallet Setup
-
-```bash
-# Derive Orchard IVK from a BIP39 mnemonic
-cargo run --bin zimppy-derive-ivk --features keygen -- "your 24 word mnemonic"
-# → Address: utest1...
-# → Orchard IVK: 803af23f...
-
-# Config lives in config/server-wallet.json
 ```
 
 ## Spec Compliance
