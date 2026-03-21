@@ -1,0 +1,7 @@
+{
+  "WARNING": "TESTNET ONLY — never commit mainnet keys",
+  "network": "testnet",
+  "address": "utest1...",
+  "orchardIvk": "your-orchard-incoming-viewing-key-hex",
+  "note": "Derive with: cargo run --bin zimppy-derive-ivk --features keygen -- 'your 24 word mnemonic'"
+}

@@ -18,6 +18,8 @@ use zimppy_rs::ZcashSessionMethod;
 type HmacSha256 = Hmac<Sha256>;
 
 const PROBLEM_JSON: &str = "application/problem+json";
+const AI_SYSTEM_PROMPT: &str = "You are a concise document summarizer. Summarize the given text in 2-4 sentences, capturing the key points. Be direct and informative.";
+const NO_SUMMARY: &str = "(no summary generated)";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,9 +34,11 @@ struct AppState {
     session: ZcashSessionMethod,
     config: ServerWalletConfig,
     amount_zat: u64,
+    stream_tick_cost_zat: u64,
     secret_key: String,
     vibeproxy_url: String,
     vibeproxy_model: String,
+    http_client: reqwest::Client,
     challenges: Mutex<HashMap<String, (u64, u64)>>,
 }
 
@@ -52,7 +56,11 @@ async fn main() {
         .unwrap_or_else(|_| "https://zcash-testnet-zebrad.gateway.tatum.io".to_string());
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3181);
     let price: u64 = std::env::var("PRICE_ZAT").ok().and_then(|p| p.parse().ok()).unwrap_or(10_000);
-    let secret_key = std::env::var("MPP_SECRET_KEY").unwrap_or_else(|_| "zimppy-ai-secret".to_string());
+    let stream_tick_cost: u64 = std::env::var("STREAM_TICK_COST_ZAT").ok().and_then(|p| p.parse().ok()).unwrap_or(1_000);
+    let secret_key = std::env::var("MPP_SECRET_KEY").unwrap_or_else(|_| {
+        eprintln!("  WARNING: MPP_SECRET_KEY not set, using default (insecure for production)");
+        "zimppy-ai-secret".to_string()
+    });
     let vibeproxy_url = std::env::var("VIBEPROXY_URL").unwrap_or_else(|_| "http://localhost:8317".to_string());
     let vibeproxy_model = std::env::var("VIBEPROXY_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
 
@@ -91,9 +99,11 @@ async fn main() {
         session,
         config,
         amount_zat: price,
+        stream_tick_cost_zat: stream_tick_cost,
         secret_key,
         vibeproxy_url,
         vibeproxy_model,
+        http_client: reqwest::Client::new(),
         challenges: Mutex::new(HashMap::new()),
     });
 
@@ -108,7 +118,7 @@ async fn main() {
     eprintln!("  endpoints:");
     eprintln!("    POST /api/summarize           (charge, {} zat)", price);
     eprintln!("    POST /api/session/summarize    (session, {} zat/req)", price);
-    eprintln!("    POST /api/stream/summarize     (stream, 1000 zat/token)");
+    eprintln!("    POST /api/stream/summarize     (stream, {} zat/token)", stream_tick_cost);
     eprintln!("  listening on http://0.0.0.0:{port}");
     eprintln!("  discovery: http://0.0.0.0:{port}/.well-known/payment");
     eprintln!();
@@ -123,27 +133,20 @@ async fn main() {
 // ── AI backend ────────────────────────────────────────────────────────
 
 async fn call_ai(state: &AppState, text: &str) -> Result<String, String> {
-    let client = reqwest::Client::new();
     let url = format!("{}/v1/chat/completions", state.vibeproxy_url);
 
     let body = serde_json::json!({
         "model": state.vibeproxy_model,
         "messages": [
-            {
-                "role": "system",
-                "content": "You are a concise document summarizer. Summarize the given text in 2-4 sentences, capturing the key points. Be direct and informative."
-            },
-            {
-                "role": "user",
-                "content": format!("Summarize the following text:\n\n{text}")
-            }
+            { "role": "system", "content": AI_SYSTEM_PROMPT },
+            { "role": "user", "content": format!("Summarize the following text:\n\n{text}") }
         ],
         "max_tokens": 256,
     });
 
     eprintln!("[AI] Calling VibeProxy ({})...", state.vibeproxy_model);
 
-    let resp = client.post(&url)
+    let resp = state.http_client.post(&url)
         .header("Content-Type", "application/json")
         .header("Authorization", "Bearer dummy-not-used")
         .json(&body)
@@ -162,7 +165,7 @@ async fn call_ai(state: &AppState, text: &str) -> Result<String, String> {
     let summary = resp_body
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
-        .unwrap_or("(no summary generated)")
+        .unwrap_or(NO_SUMMARY)
         .to_string();
 
     eprintln!("[AI] Summary: {}...", &summary[..summary.len().min(80)]);
@@ -176,7 +179,7 @@ async fn discovery(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         "service": "zimppy-ai-summarizer",
         "description": "Private document summarization powered by AI. Pay with Zcash, get a summary.",
         "methods": ["zcash"],
-        "intents": ["charge", "session"],
+        "intents": ["charge", "session", "stream"],
         "network": state.config.network,
         "recipient": state.config.address,
         "currency": "ZEC",
@@ -195,6 +198,15 @@ async fn discovery(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 "intent": "session",
                 "amount": state.amount_zat.to_string(),
                 "description": "Summarize via prepaid session (deposit once, many requests)",
+                "body": {"text": "Your document text here..."},
+            },
+            {
+                "path": "/api/stream/summarize",
+                "method": "POST",
+                "intent": "stream",
+                "amount": state.stream_tick_cost_zat.to_string(),
+                "unit": "zat/token",
+                "description": "Streaming summary, pay per token via SSE",
                 "body": {"text": "Your document text here..."},
             },
             {
@@ -465,50 +477,14 @@ async fn stream_summarize(
 
     eprintln!("[STREAM] Starting AI stream for session {session_id}");
 
-    // Call VibeProxy with streaming
-    let client = reqwest::Client::new();
-    let url = format!("{}/v1/chat/completions", state.vibeproxy_url);
-    let ai_body = serde_json::json!({
-        "model": state.vibeproxy_model,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a concise document summarizer. Summarize the given text in 2-4 sentences, capturing the key points. Be direct and informative."
-            },
-            {
-                "role": "user",
-                "content": format!("Summarize the following text:\n\n{text}")
-            }
-        ],
-        "max_tokens": 256,
-        "stream": false,
-    });
-
-    let ai_resp = match client.post(&url)
-        .header("Content-Type", "application/json")
-        .header("Authorization", "Bearer dummy-not-used")
-        .json(&ai_body)
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => return problem_response(500, "AI Error", &format!("AI request failed: {e}")),
+    let summary = match call_ai(&state, &text).await {
+        Ok(s) => s,
+        Err(e) => return problem_response(500, "AI Error", &e),
     };
-
-    let ai_json: serde_json::Value = match ai_resp.json().await {
-        Ok(v) => v,
-        Err(e) => return problem_response(500, "AI Error", &format!("AI parse failed: {e}")),
-    };
-
-    let summary = ai_json
-        .pointer("/choices/0/message/content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("(no summary)")
-        .to_string();
 
     // Stream the summary word by word, deducting per token
     let words: Vec<&str> = summary.split_whitespace().collect();
-    let tick_cost: u64 = 1000; // 1000 zat per word
+    let tick_cost: u64 = state.stream_tick_cost_zat;
     let mut total_spent: u64 = 0;
     let mut total_chunks: u64 = 0;
     let mut sse_body = String::new();
@@ -669,7 +645,6 @@ fn base64url_encode(data: &[u8]) -> String {
 fn base64url_decode(input: &str) -> Result<Vec<u8>, ()> {
     let padded = format!("{}{}", input, &"===="[..((4 - input.len() % 4) % 4)]);
     let standard = padded.replace('-', "+").replace('_', "/");
-    use std::io::Read;
     let decoded = standard.as_bytes().iter().filter_map(|&b| {
         match b {
             b'A'..=b'Z' => Some(b - b'A'),
@@ -697,6 +672,5 @@ fn base64url_decode(input: &str) -> Result<Vec<u8>, ()> {
     if remaining >= 3 {
         result.push((decoded[i + 1] << 4) | (decoded[i + 2] >> 2));
     }
-    let _ = result.bytes(); // suppress warning
     Ok(result)
 }

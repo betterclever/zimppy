@@ -9,3 +9,6 @@ target/
 packages/zimppy-ts/index.d.ts
 
 .omx/
+
+# Server wallet config (contains viewing keys — use .example.json as template)
+config/server-wallet.json

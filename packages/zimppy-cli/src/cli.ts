@@ -17,7 +17,7 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,6 +37,7 @@ interface ZimppyConfig {
   lwdServer: string
   rpcEndpoint: string
   network: 'testnet' | 'mainnet'
+  address?: string  // cached unified address for refunds
 }
 
 function loadConfig(): ZimppyConfig | null {
@@ -64,6 +65,12 @@ interface SessionState {
   sessionId: string
   bearer: string  // the deposit txid
   url: string     // base URL of the session server
+  endpoint?: string // the session endpoint path (e.g. /api/session/fortune)
+}
+
+function getWalletAddress(cfg: ZimppyConfig): string {
+  if (cfg.address) return cfg.address
+  throw new Error('No wallet address cached. Run "zimppy wallet whoami" first.')
 }
 
 function loadSession(): SessionState | null {
@@ -79,7 +86,7 @@ function saveSession(session: SessionState): void {
 
 function clearSession(): void {
   if (existsSync(SESSION_FILE)) {
-    writeFileSync(SESSION_FILE, '')
+    unlinkSync(SESSION_FILE)
   }
 }
 
@@ -167,6 +174,11 @@ async function walletWhoami(): Promise<void> {
     const addrLine = addr.split('\n').find((l: string) => l.includes('utest1') || l.includes('u1'))?.trim() ?? addr
     const address = addrLine.replace(/^.*?Address:\s*/, '').trim()
     const shortAddr = address.length > 50 ? `${address.slice(0, 25)}...${address.slice(-15)}` : address
+
+    // Cache address in config for refund operations
+    if (address && address !== cfg.address) {
+      saveConfig({ ...cfg, address })
+    }
 
     const lines = bal.split('\n').map((l: string) => l.trim()).filter(Boolean)
     const total = lines.find((l: string) => l.startsWith('Balance:'))?.replace('Balance:', '').trim() ?? '?'
@@ -486,7 +498,7 @@ async function handleRequest(args: string[]): Promise<void> {
     // Open a session with the deposit txid
     console.error('  🎫 Opening session with deposit...')
     const openCred = Buffer.from(JSON.stringify({
-      payload: { action: 'open', depositTxid: txid, refundAddress: cfg.walletDir },
+      payload: { action: 'open', depositTxid: txid, refundAddress: getWalletAddress(cfg) },
     }), 'utf-8').toString('base64url')
 
     const openResp = await fetch(url, {
@@ -497,7 +509,7 @@ async function handleRequest(args: string[]): Promise<void> {
     const openResult = await openResp.json() as { sessionId?: string; status?: string; fortune?: string }
 
     if (openResp.status === 200 && openResult.sessionId) {
-      saveSession({ sessionId: openResult.sessionId, bearer: txid, url: baseUrl })
+      saveSession({ sessionId: openResult.sessionId, bearer: txid, url: baseUrl, endpoint: new URL(url).pathname })
       console.error(`  ✅ Session opened: ${openResult.sessionId}`)
       console.error('')
       console.error(`  --- Session Active ---`)
@@ -573,8 +585,8 @@ async function handleSessionClose(): Promise<void> {
     payload: { action: 'close', sessionId: session.sessionId, bearer: session.bearer },
   }), 'utf-8').toString('base64url')
 
-  // Use any session endpoint URL to send the close
-  const closeUrl = `${session.url}/api/session/fortune`
+  const closePath = session.endpoint ?? '/api/session/fortune'
+  const closeUrl = `${session.url}${closePath}`
   const resp = await fetch(closeUrl, {
     headers: { Authorization: `Payment ${closeCred}` },
   })
@@ -638,9 +650,7 @@ Commands:
   zimppy wallet balance          Show balance
   zimppy wallet fund             How to add funds
   zimppy wallet services         List available paid services
-  zimppy wallet services --search <query>  Search services
   zimppy request <URL>           Make HTTP request with auto-pay
-  zimppy request -t <URL>        Terse output (agent-friendly)
   zimppy request --dry-run <URL> Show what would be sent
   zimppy --version               Show version
 
@@ -648,7 +658,6 @@ Request options:
   -X METHOD        HTTP method (default: GET)
   --json '{...}'   Send JSON body (implies POST)
   -H 'Key: Val'    Add header
-  -t               Terse/compact output for agents
   --dry-run        Show request without sending
   -m <seconds>     Timeout
 
@@ -656,7 +665,7 @@ Examples:
   zimppy wallet whoami
   zimppy wallet services --search fortune
   zimppy request http://localhost:3180/api/fortune
-  zimppy request -t -X GET http://localhost:3180/api/fortune`)
+  zimppy request -X GET http://localhost:3180/api/fortune`)
     return
   }
 

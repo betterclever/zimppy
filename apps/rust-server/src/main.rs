@@ -59,8 +59,10 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(42_000);
-    let secret_key = std::env::var("MPP_SECRET_KEY")
-        .unwrap_or_else(|_| "zimppy-demo-secret-key".to_string());
+    let secret_key = std::env::var("MPP_SECRET_KEY").unwrap_or_else(|_| {
+        eprintln!("  WARNING: MPP_SECRET_KEY not set, using default (insecure for production)");
+        "zimppy-demo-secret-key".to_string()
+    });
 
     // Load server wallet config
     let config_path = std::env::var("SERVER_WALLET_CONFIG")
