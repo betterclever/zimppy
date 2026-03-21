@@ -71,7 +71,7 @@ npx zimppy request http://localhost:3180/api/fortune
 npx zimppy request --dry-run http://localhost:3180/api/fortune
 
 # POST with JSON body
-npx zimppy request -X POST --json '{"city":"Tokyo"}' http://localhost:3180/api/weather
+npx zimppy request -X POST --json '{"text":"Your document text here..."}' http://localhost:3181/api/summarize
 
 # Session with custom deposit (default: 10x per-request price)
 npx zimppy request --deposit 500000 http://localhost:3180/api/session/fortune

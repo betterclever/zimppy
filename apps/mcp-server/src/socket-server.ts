@@ -1,7 +1,7 @@
 import { createServer } from 'node:net'
 import { readFileSync } from 'node:fs'
 import { createMcpApp } from './app.js'
-import { SocketTransport } from '../../demo/socket-transport.js'
+import { SocketTransport } from './socket-transport.js'
 
 const configPath = process.env.SERVER_WALLET_CONFIG ?? 'config/server-wallet.json'
 const walletConfig = JSON.parse(readFileSync(configPath, 'utf-8')) as {

@@ -10,8 +10,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "lint": "node scripts/lint.mjs",
-    "test": "tsx --test packages/zimppy-ts/test/**/*.test.ts apps/*/test/**/*.test.ts 2>/dev/null || true"
+    "test": "tsx --test packages/zimppy-ts/test/**/*.test.ts apps/*/test/**/*.test.ts"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.1",

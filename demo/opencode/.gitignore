@@ -1,0 +1,6 @@
+# Demo output artifacts
+*.json
+*.html
+*.txt
+!SKILL.md
+!AGENTS.md
