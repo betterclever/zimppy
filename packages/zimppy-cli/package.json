@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@zimppy/core-napi": "0.2.0",
+    "mppx": "^0.4.8",
+    "zimppy-ts": "0.2.0",
     "tsx": "^4.21.0"
   },
   "repository": {

@@ -21,6 +21,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFile
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ZimppyWalletNapi } from '@zimppy/core-napi'
+import { Mppx } from 'mppx/client'
+import { zcashClient, zcashSessionClient } from 'zimppy-ts'
 
 const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
@@ -387,6 +389,88 @@ async function walletServices(args: string[]): Promise<void> {
   console.log(JSON.stringify(services, null, 2))
 }
 
+// ── Helpers ─────────────────────────────────────────────────────────
+
+async function waitForConfirmation(cfg: ZimppyConfig, txid: string): Promise<void> {
+  console.error('  Waiting for Zcash block confirmation (~75s)...')
+  const startTime = Date.now()
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 15000))
+    const elapsed = Math.round((Date.now() - startTime) / 1000)
+    const bar = '\u2588'.repeat(Math.min(i + 1, 10)) + '\u2591'.repeat(Math.max(10 - i - 1, 0))
+    process.stderr.write(`\r  [${bar}] ${elapsed}s elapsed...`)
+    try {
+      const resp = await fetch(cfg.rpcEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'getrawtransaction', params: [txid, 1], id: 1 }),
+      })
+      const data = await resp.json() as { result?: { confirmations?: number } }
+      if (data.result?.confirmations && data.result.confirmations > 0) {
+        const totalTime = Math.round((Date.now() - startTime) / 1000)
+        console.error(`\r  Confirmed in ${totalTime}s (${data.result.confirmations} confirmations)          `)
+        return
+      }
+    } catch { /* keep polling */ }
+  }
+}
+
+async function sendViaWallet(cfg: ZimppyConfig, params: { to: string; amountZat: string; memo: string }): Promise<string> {
+  const amountZec = (Number(params.amountZat) / 100_000_000).toFixed(8)
+  console.error(`  Sending ${params.amountZat} zat (${amountZec} ZEC)...`)
+
+  const wallet = await openWallet(cfg)
+  process.stderr.write('  Syncing wallet...')
+  await wallet.sync()
+  console.error(' done')
+
+  process.stderr.write('  Broadcasting transaction...')
+  const txid = await wallet.send(params.to, params.amountZat, params.memo)
+  console.error(' done')
+  console.error(`  txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
+  console.error('')
+
+  await waitForConfirmation(cfg, txid)
+  return txid
+}
+
+function createMppxClient(cfg: ZimppyConfig) {
+  const sessionClient = zcashSessionClient({
+    sendPayment: (params) => sendViaWallet(cfg, params),
+    refundAddress: cfg.address || (() => {
+      console.error('ERROR: No wallet address cached. Run: npx zimppy wallet whoami')
+      process.exit(1)
+    })(),
+  })
+
+  const client = Mppx.create({
+    methods: [
+      zcashClient({
+        createPayment: async ({ challenge }) => {
+          console.error('')
+          console.error(`  --- Charge ---`)
+          console.error(`  Amount:    ${challenge.amount} zat`)
+          console.error(`  Recipient: ${challenge.recipient.slice(0, 40)}...`)
+          console.error(`  ---`)
+          console.error('')
+
+          const txid = await sendViaWallet(cfg, {
+            to: challenge.recipient,
+            amountZat: challenge.amount,
+            memo: challenge.memo,
+          })
+
+          return { txid, challengeId: challenge.challengeId }
+        },
+      }),
+      sessionClient,
+    ],
+    polyfill: false,
+  })
+
+  return { client, sessionClient }
+}
+
 // ── Request command ─────────────────────────────────────────────────
 
 async function handleRequest(args: string[]): Promise<void> {
@@ -397,7 +481,6 @@ async function handleRequest(args: string[]): Promise<void> {
   let body: string | undefined
   let url = ''
   let dryRun = false
-  let depositOverride: number | undefined
   const headers: Record<string, string> = {}
 
   for (let i = 0; i < args.length; i++) {
@@ -405,7 +488,6 @@ async function handleRequest(args: string[]): Promise<void> {
     else if (args[i] === '--json' && args[i + 1]) { body = args[++i]; method = method === 'GET' ? 'POST' : method }
     else if (args[i] === '-H' && args[i + 1]) { const [k, ...v] = args[++i].split(':'); headers[k.trim()] = v.join(':').trim() }
     else if (args[i] === '--dry-run') dryRun = true
-    else if (args[i] === '--deposit' && args[i + 1]) { depositOverride = Number(args[++i]) }
     else if (args[i] === '-m' && args[i + 1]) { i++ } // timeout, ignore for now
     else if (!args[i].startsWith('-')) url = args[i]
   }
@@ -423,199 +505,52 @@ async function handleRequest(args: string[]): Promise<void> {
     return
   }
 
-  console.error(`→ ${method} ${url}`)
+  console.error(`> ${method} ${url}`)
 
-  // Check if we have an active session for this URL's base
+  // Restore active session if one exists for this server
   const baseUrl = new URL(url).origin
-  const session = loadSession()
-  if (session && session.url === baseUrl) {
-    console.error(`  🎫 Using active session: ${session.sessionId}`)
-    const bearerCred = Buffer.from(JSON.stringify({
-      payload: { action: 'bearer', sessionId: session.sessionId, bearer: session.bearer },
-    }), 'utf-8').toString('base64url')
+  const { client: mppxClient, sessionClient } = createMppxClient(cfg)
 
-    const sessionResp = await fetch(url, {
-      method,
-      headers: { ...headers, Authorization: `Payment ${bearerCred}` },
-      body,
+  const persistedSession = loadSession()
+  if (persistedSession && persistedSession.url === baseUrl) {
+    // Hydrate the session client with persisted state
+    // The session client will use bearer credentials automatically
+    sessionClient.restore(persistedSession.sessionId, persistedSession.bearer)
+    console.error(`  Active session: ${persistedSession.sessionId}`)
+  }
+
+  // mppx.fetch handles the full flow:
+  // - If free endpoint: returns response directly
+  // - If 402 charge: calls zcashClient.createPayment → wallet send → retry
+  // - If 402 session: calls zcashSessionClient.sendPayment → deposit → open
+  // - If active session: sends bearer credential automatically
+  const resp = await mppxClient.fetch(url, { method, headers, body })
+
+  const result = await resp.text()
+
+  // Persist session state if a new session was opened
+  const activeSession = sessionClient.getSession()
+  if (activeSession && activeSession.sessionId) {
+    saveSession({
+      sessionId: activeSession.sessionId,
+      bearer: activeSession.bearer,
+      url: baseUrl,
+      endpoint: new URL(url).pathname,
     })
-
-    if (sessionResp.status === 200) {
-      console.error(`  ✅ Session bearer accepted`)
-      console.log(await sessionResp.text())
-      return
-    }
-    // Session might be expired/closed — fall through to regular flow
-    console.error(`  ⚠️  Session bearer rejected (${sessionResp.status}), falling back to new payment`)
-    clearSession()
   }
 
-  // First request
-  const resp1 = await fetch(url, { method, headers, body })
-
-  if (resp1.status !== 402) {
-    console.error(`← ${resp1.status}`)
-    console.log(await resp1.text())
-    return
-  }
-
-  console.error('← 402 Payment Required')
-
-  // Parse challenge
-  const wwwAuth = resp1.headers.get('www-authenticate') ?? ''
-  const requestMatch = wwwAuth.match(/request="([^"]+)"/)
-  if (!requestMatch) {
-    console.error('ERROR: No payment challenge found')
-    process.exit(1)
-  }
-
-  const padded = requestMatch[1] + '=='.slice(0, (4 - (requestMatch[1].length % 4)) % 4)
-  const challenge = JSON.parse(Buffer.from(padded, 'base64url').toString('utf-8')) as {
-    challengeId: string; amount: string; recipient: string; memo: string
-  }
-
-  // For session endpoints, deposit more than a single request's worth
-  const isSessionEndpoint = url.includes('/session/') || url.includes('/stream/')
-  const perRequestZat = Number(challenge.amount)
-  const depositMultiplier = 10
-  const sendAmountZat = isSessionEndpoint
-    ? (depositOverride ?? perRequestZat * depositMultiplier)
-    : perRequestZat
-  const sendAmount = String(sendAmountZat)
-  const amountZec = (sendAmountZat / 100_000_000).toFixed(8)
-  console.error('')
-  console.error(`  --- Payment Challenge ---`)
-  if (isSessionEndpoint) {
-    console.error(`  Per-req:   ${challenge.amount} zat`)
-    console.error(`  Deposit:   ${sendAmount} zat (${amountZec} ZEC) [${depositOverride ? 'custom' : `${depositMultiplier}x`}]`)
+  if (resp.status === 200) {
+    console.error('')
+    console.error(`  --- Payment Complete ---`)
+    console.error(`  Status:  Verified`)
+    console.error(`  Privacy: Fully shielded (Orchard)`)
+    console.error(`  ---`)
+    console.error('')
   } else {
-    console.error(`  Amount:    ${sendAmount} zat (${amountZec} ZEC)`)
-  }
-  console.error(`  Recipient: ${challenge.recipient.slice(0, 40)}...`)
-  console.error(`  Memo:      ${challenge.memo.slice(0, 40)}...`)
-  console.error(`  ---`)
-  console.error('')
-  console.error('  🔒 Sending shielded Zcash payment...')
-
-  // Sync + send via native wallet
-  let txid: string
-  try {
-    const wallet = await openWallet(cfg)
-
-    process.stderr.write('  ⏳ Syncing wallet...')
-    await wallet.sync()
-    console.error(' done')
-
-    process.stderr.write('  📡 Broadcasting transaction...')
-    txid = await wallet.send(challenge.recipient, sendAmount, challenge.memo)
-  } catch (e) {
-    console.error(' FAILED')
-    console.error(`ERROR: Send failed: ${(e as Error).message}`)
-    process.exit(1)
+    console.error(`  ${resp.status}`)
   }
 
-  console.error(' done')
-  console.error(`  📦 txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
-  console.error('')
-
-  // Wait for confirmation with progress
-  console.error('  ⛏️  Waiting for Zcash block confirmation (~75s)...')
-  const startTime = Date.now()
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 15000))
-    const elapsed = Math.round((Date.now() - startTime) / 1000)
-    const bar = '█'.repeat(Math.min(i + 1, 10)) + '░'.repeat(Math.max(10 - i - 1, 0))
-    process.stderr.write(`\r  ⛏️  [${bar}] ${elapsed}s elapsed...`)
-    try {
-      const resp = await fetch(cfg.rpcEndpoint, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', method: 'getrawtransaction', params: [txid, 1], id: 1 }),
-      })
-      const data = await resp.json() as { result?: { confirmations?: number } }
-      if (data.result?.confirmations && data.result.confirmations > 0) {
-        const totalTime = Math.round((Date.now() - startTime) / 1000)
-        console.error(`\r  ✅ Confirmed in ${totalTime}s (${data.result.confirmations} confirmations)          `)
-        break
-      }
-    } catch { /* keep polling */ }
-  }
-
-  if (isSessionEndpoint) {
-    // Open a session with the deposit txid
-    console.error('  🎫 Opening session with deposit...')
-    const openCred = Buffer.from(JSON.stringify({
-      payload: { action: 'open', depositTxid: txid, refundAddress: getWalletAddress(cfg) },
-    }), 'utf-8').toString('base64url')
-
-    const openResp = await fetch(url, {
-      method,
-      headers: { ...headers, Authorization: `Payment ${openCred}` },
-      body,
-    })
-    const openResult = await openResp.json() as { sessionId?: string; status?: string; fortune?: string }
-
-    if (openResp.status === 200 && openResult.sessionId) {
-      saveSession({ sessionId: openResult.sessionId, bearer: txid, url: baseUrl, endpoint: new URL(url).pathname })
-      console.error(`  ✅ Session opened: ${openResult.sessionId}`)
-      console.error('')
-      console.error(`  --- Session Active ---`)
-      console.error(`  Session:  ${openResult.sessionId}`)
-      console.error(`  Deposit:  ${sendAmount} zat (${amountZec} ZEC)`)
-      console.error(`  Privacy:  🔒 Fully shielded (Orchard)`)
-      console.error(`  Next:     Bearer requests are instant!`)
-      console.error(`  ---`)
-      console.error('')
-      // If the open also returned content (fortune), show it
-      if (openResult.fortune) {
-        console.log(JSON.stringify(openResult))
-      } else {
-        // Make a bearer request to get actual content
-        console.error('  🎫 Fetching content via bearer...')
-        const bearerCred = Buffer.from(JSON.stringify({
-          payload: { action: 'bearer', sessionId: openResult.sessionId, bearer: txid },
-        }), 'utf-8').toString('base64url')
-        const contentResp = await fetch(url, {
-          method,
-          headers: { ...headers, Authorization: `Payment ${bearerCred}` },
-          body,
-        })
-        console.log(await contentResp.text())
-      }
-    } else {
-      console.error(`  ❌ Session open failed: ${JSON.stringify(openResult)}`)
-    }
-  } else {
-    // Regular charge flow — retry with credential
-    console.error('  🔄 Retrying with payment credential...')
-
-    const credential = Buffer.from(JSON.stringify({
-      payload: { txid, challengeId: challenge.challengeId },
-    }), 'utf-8').toString('base64url')
-
-    const resp2 = await fetch(url, {
-      method,
-      headers: { ...headers, Authorization: `Payment ${credential}` },
-      body,
-    })
-
-    const result = await resp2.text()
-
-    if (resp2.status === 200) {
-      console.error('')
-      console.error(`  --- Payment Complete ---`)
-      console.error(`  ✅ Status:  Verified`)
-      console.error(`  💰 Paid:    ${sendAmount} zat (${amountZec} ZEC)`)
-      console.error(`  📦 txid:    ${txid.slice(0, 16)}...${txid.slice(-8)}`)
-      console.error(`  🔒 Privacy: Fully shielded (Orchard)`)
-      console.error(`  ---`)
-      console.error('')
-      console.log(result)
-    } else {
-      console.error(`  ❌ ${resp2.status}: Payment verification failed`)
-      console.log(result)
-    }
-  }
+  console.log(result)
 }
 
 // ── Session commands ────────────────────────────────────────────────
@@ -627,45 +562,30 @@ async function handleSessionClose(): Promise<void> {
     return
   }
 
+  const cfg = requireConfig()
   console.error(`Closing session ${session.sessionId}...`)
-  const closeCred = Buffer.from(JSON.stringify({
-    payload: { action: 'close', sessionId: session.sessionId, bearer: session.bearer },
-  }), 'utf-8').toString('base64url')
+
+  const { client: mppxClient, sessionClient } = createMppxClient(cfg)
+  sessionClient.restore(session.sessionId, session.bearer)
+  sessionClient.close()
 
   const closePath = session.endpoint ?? '/api/session/fortune'
   const closeUrl = `${session.url}${closePath}`
-  const resp = await fetch(closeUrl, {
-    headers: { Authorization: `Payment ${closeCred}` },
-  })
 
-  const resultText = await resp.text()
+  const resp = await mppxClient.fetch(closeUrl)
+
   clearSession()
 
-  if (resp.status === 200) {
-    // Check server logs via receipt header for refund info
-    const receiptHeader = resp.headers.get('payment-receipt') ?? ''
-    let refundInfo = 'none (fully spent)'
-    try {
-      const padded = receiptHeader + '=='.slice(0, (4 - (receiptHeader.length % 4)) % 4)
-      const receipt = JSON.parse(Buffer.from(padded, 'base64url').toString('utf-8')) as Record<string, unknown>
-      if (receipt.refundTxid) {
-        refundInfo = `${(receipt.refundTxid as string).slice(0, 16)}...`
-      }
-    } catch { /* no receipt */ }
-
-    // Also try parsing the JSON body for session close details
-    try {
-      const body = JSON.parse(resultText) as Record<string, unknown>
-      if (body.refundTxid) refundInfo = `${(body.refundTxid as string).slice(0, 16)}...`
-    } catch { /* not json */ }
-
+  if (resp.status === 200 || resp.status === 204) {
+    const receiptHeader = resp.headers.get('payment-receipt') ?? resp.headers.get('Payment-Receipt') ?? ''
     console.log(`--- Session Closed ---`)
     console.log(`  Session:  ${session.sessionId}`)
-    console.log(`  Refund:   ${refundInfo}`)
     console.log(`  Status:   Closed`)
+    if (receiptHeader) console.log(`  Receipt:  ${receiptHeader.slice(0, 40)}...`)
     console.log(`---`)
   } else {
-    console.error(`Close failed: ${resultText}`)
+    const body = await resp.text()
+    console.error(`Close failed: ${resp.status} ${body}`)
   }
 }
 
