@@ -1,0 +1,20 @@
+[package]
+name = "zimppy-wallet"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+description = "Native Zcash wallet for Zimppy, powered by zingolib"
+
+[dependencies]
+zingolib = { git = "https://github.com/zingolabs/zingolib.git", tag = "zingolib_v3.0.0" }
+zcash_protocol = "0.7"
+zcash_address = "0.10"
+bip0039 = { version = "0.13", features = ["rand"] }
+rustls = "0.23"
+zip32 = "0.2"
+tokio = { version = "1.50", features = ["full"] }
+thiserror = "2.0"
+tracing = "0.1"
+
+[lints]
+workspace = true
