@@ -75,7 +75,7 @@ async fn main() {
     eprintln!("=== zimppy MPP server ===");
     eprintln!("  network: {}", config.network);
     eprintln!("  address: {}...{}", &config.address[..20], &config.address[config.address.len()-8..]);
-    eprintln!("  IVK: {}...{}", &config.orchard_ivk[..16], &config.orchard_ivk[config.orchard_ivk.len()-8..]);
+    eprintln!("  IVK: (loaded, {} bytes)", config.orchard_ivk.len());
     eprintln!("  price: {} zat per request", price);
     eprintln!("  RPC: {rpc_endpoint}");
     eprintln!("  port: {port}");

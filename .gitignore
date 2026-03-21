@@ -12,3 +12,11 @@ packages/zimppy-ts/index.d.ts
 
 # Server wallet config (contains viewing keys — use .example.json as template)
 config/server-wallet.json
+config/remote-chain-service.json
+
+# Local state and secrets
+.local/
+.env
+.env.*
+*.pem
+*.key

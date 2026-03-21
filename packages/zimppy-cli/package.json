@@ -1,6 +1,8 @@
 {
   "name": "zimppy",
   "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
   "description": "Private machine payments on Zcash — curl-compatible CLI with automatic payment handling",
   "type": "module",
   "bin": {
