@@ -85,6 +85,7 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  // Non-standard convenience endpoint (MPP discovery spec uses /openapi.json)
   if (url.pathname === '/.well-known/payment') {
     await NodeListener.sendResponse(
       res,

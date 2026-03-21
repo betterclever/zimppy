@@ -8,7 +8,7 @@
  *
  * Event types:
  *   event: message        → data chunk (the actual content)
- *   event: payment-need-voucher → balance exhausted, client must topUp
+ *   event: payment-need-topup → balance exhausted, client must topUp
  *   event: payment-receipt → stream complete, final receipt
  */
 
@@ -29,11 +29,14 @@ export interface ServeStreamOptions {
   pollIntervalMs?: number
 }
 
-export interface NeedVoucherEvent {
+export interface NeedTopupEvent {
   sessionId: string
-  requiredAmount: number
-  currentBalance: number
+  balanceRequired: number
+  balanceSpent: number
 }
+
+/** @deprecated Use NeedTopupEvent */
+export type NeedVoucherEvent = NeedTopupEvent
 
 export interface StreamReceipt {
   sessionId: string
@@ -69,14 +72,14 @@ export function serveStream(options: ServeStreamOptions): ReadableStream<string>
             totalSpent += tickCost
             totalChunks++
           } catch {
-            // Balance exhausted — emit need-voucher and wait
+            // Balance exhausted — emit need-topup and wait
             const balance = await getBalance(sessionId).catch(() => 0)
-            const needVoucher: NeedVoucherEvent = {
+            const needTopup: NeedTopupEvent = {
               sessionId,
-              requiredAmount: tickCost,
-              currentBalance: balance,
+              balanceRequired: tickCost,
+              balanceSpent: balance,
             }
-            controller.enqueue(formatSSE('payment-need-voucher', JSON.stringify(needVoucher)))
+            controller.enqueue(formatSSE('payment-need-topup', JSON.stringify(needTopup)))
 
             // Poll for topUp
             const deadline = Date.now() + topUpTimeoutMs
