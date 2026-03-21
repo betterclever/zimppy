@@ -67,6 +67,7 @@ pub struct RefundConfig {
 pub struct ZcashSessionMethod {
     rpc: ZebradRpc,
     orchard_ivk: String,
+    network: String,
     consumed: ConsumedTxids,
     sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     refund_config: Option<RefundConfig>,
@@ -77,10 +78,16 @@ impl ZcashSessionMethod {
         Self {
             rpc: ZebradRpc::new(rpc_endpoint),
             orchard_ivk: orchard_ivk.to_string(),
+            network: "testnet".to_string(),
             consumed: ConsumedTxids::new(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             refund_config: None,
         }
+    }
+
+    pub fn with_network(mut self, network: &str) -> Self {
+        self.network = network.to_string();
+        self
     }
 
     pub fn with_refund_config(mut self, config: RefundConfig) -> Self {
@@ -160,7 +167,7 @@ impl ZcashSessionMethod {
             deposit_amount_zat: deposit_amount,
             spent_zat: 0, // nothing charged on open — billing starts on first bearer/stream use
             refund_address: refund_address.to_string(),
-            network: "testnet".to_string(),
+            network: self.network.clone(),
             status: SessionStatus::Active,
         };
 
