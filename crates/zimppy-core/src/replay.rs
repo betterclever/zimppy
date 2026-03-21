@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// Thread-safe consumed txid tracker for replay protection.
@@ -7,13 +8,35 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Clone)]
 pub struct ConsumedTxids {
     inner: Arc<Mutex<HashSet<String>>>,
+    file_path: Option<PathBuf>,
 }
 
 impl ConsumedTxids {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(HashSet::new())),
+            file_path: None,
         }
+    }
+
+    /// Create a file-backed `ConsumedTxids` that loads existing txids from `path`
+    /// on construction and appends each new txid to the file on insert.
+    pub fn with_file(path: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let path = path.into();
+        let mut set = HashSet::new();
+        if path.exists() {
+            let contents = std::fs::read_to_string(&path)?;
+            for line in contents.lines() {
+                let txid = line.trim();
+                if !txid.is_empty() {
+                    set.insert(txid.to_string());
+                }
+            }
+        }
+        Ok(Self {
+            inner: Arc::new(Mutex::new(set)),
+            file_path: Some(path),
+        })
     }
 
     /// Check if a txid has already been consumed. If not, insert it.
@@ -27,6 +50,13 @@ impl ConsumedTxids {
             return Err(ReplayError::AlreadyConsumed);
         }
         set.insert(txid.to_string());
+        // Persist to file if configured.
+        if let Some(ref path) = self.file_path {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(f, "{txid}");
+            }
+        }
         Ok(())
     }
 
