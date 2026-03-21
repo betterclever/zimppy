@@ -122,10 +122,9 @@ packages/
   zimppy-cli/         CLI with auto-pay and session management
 examples/
   fortune-teller/     Fortune teller MPP server + charge/session/stream demos
-  llm-summarizer/     AI summarizer server + pay-per-token demo
+  llm-summarizer/     LLM summarizer server + pay-per-token demo + OpenCode agent
   mcp-server/         MCP tool server with paid AI tools
   ts-server/          TypeScript MPP server
-  opencode-agent/     AI agent demo (OpenCode + VibeProxy)
 config/
   server-wallet.example.json  Server wallet config template
 ```

@@ -24,6 +24,6 @@ tmux send-keys -t ai-demo "PRICE_ZAT=10000 PORT=3181 ./target/debug/zimppy-ai-se
 # Right pane: OpenCode agent
 tmux split-window -h -t ai-demo
 sleep 2
-tmux send-keys -t ai-demo "cd $(pwd)/examples/opencode-agent && opencode" Enter
+tmux send-keys -t ai-demo "cd $(pwd)/examples/llm-summarizer/opencode && opencode" Enter
 
 tmux attach -t ai-demo
