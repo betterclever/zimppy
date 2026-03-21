@@ -222,10 +222,16 @@ impl ZimppyWalletNapi {
         Ok(txid)
     }
 
+    /// Get the wallet's seed phrase (if available).
+    #[napi]
+    pub async fn seed_phrase(&self) -> Option<String> {
+        let wallet = self.wallet.lock().await;
+        wallet.seed_phrase().await
+    }
+
     /// Get the network name.
     #[napi]
     pub fn network(&self) -> String {
-        // Can't easily access without lock, return based on config
         "testnet".to_string()
     }
 }

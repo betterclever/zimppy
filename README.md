@@ -78,7 +78,7 @@ Agent  →  close → refund of unused balance
 npm install zimppy
 
 # Set up wallet
-npx zimppy wallet init "your 24 word seed phrase"
+npx zimppy wallet create
 
 # Start an example server (requires cloning the repo)
 cargo run --bin zimppy-rust-server
@@ -93,14 +93,17 @@ npx zimppy request http://localhost:3180/api/fortune
 The `zimppy` CLI handles payments automatically — discover services, send shielded payments, manage sessions.
 
 ```bash
-# Create wallet from BIP39 seed phrase
-npx zimppy wallet init "your 24 word seed phrase here"
-npx zimppy wallet whoami
+# Create a wallet (generates fresh keys, shows seed phrase)
+npx zimppy wallet create
 
-# One-time paid request
+# Multiple named wallets
+npx zimppy wallet create work
+npx zimppy wallet use work
+
+# Make paid requests
 npx zimppy request http://localhost:3180/api/fortune
 
-# Session (deposits 10x, subsequent requests are instant)
+# Sessions (deposit once, instant repeat requests)
 npx zimppy request http://localhost:3180/api/session/fortune
 npx zimppy request http://localhost:3180/api/session/fortune  # instant!
 npx zimppy session close  # refund unused balance

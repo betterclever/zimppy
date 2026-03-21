@@ -17,13 +17,14 @@
  */
 
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ZimppyWalletNapi } from '@zimppy/core-napi'
 
 const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
+const WALLETS_DIR = join(CONFIG_DIR, 'wallets')
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
 const SESSION_FILE = join(CONFIG_DIR, 'session.json')
 const DEFAULT_LWD = 'https://testnet.zec.rocks'
@@ -37,6 +38,19 @@ async function openWallet(cfg: ZimppyConfig, seedPhrase?: string): Promise<Zimpp
   return Wallet.open(cfg.dataDir, cfg.lwdServer, cfg.network, seedPhrase ?? null, null)
 }
 
+function walletDir(name: string): string {
+  return join(WALLETS_DIR, name)
+}
+
+function activeWalletName(): string {
+  try {
+    const cfg = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'))
+    return cfg.activeWallet ?? 'default'
+  } catch {
+    return 'default'
+  }
+}
+
 // ── Config ──────────────────────────────────────────────────────────
 
 interface ZimppyConfig {
@@ -44,6 +58,7 @@ interface ZimppyConfig {
   lwdServer: string
   rpcEndpoint: string
   network: 'testnet' | 'mainnet'
+  activeWallet?: string
   address?: string  // cached unified address
 }
 
@@ -60,7 +75,7 @@ function saveConfig(config: ZimppyConfig): void {
 function requireConfig(): ZimppyConfig {
   const cfg = loadConfig()
   if (!cfg) {
-    console.error('No wallet configured. Run: zimppy wallet login')
+    console.error('No wallet configured. Run: zimppy wallet create')
     process.exit(1)
   }
   return cfg
@@ -99,53 +114,67 @@ function clearSession(): void {
 
 // ── Wallet commands ─────────────────────────────────────────────────
 
-async function walletLogin(): Promise<void> {
-  console.error('Setting up Zcash wallet for zimppy...')
+async function walletCreate(args?: string[]): Promise<void> {
+  const name = args?.[0] ?? 'default'
+  const dataDir = walletDir(name)
 
-  const dataDir = process.env.ZIMPPY_WALLET_DIR ?? join(CONFIG_DIR, 'wallet')
-
-  // Check if wallet already exists
   if (existsSync(join(dataDir, 'zingo-wallet.dat'))) {
-    console.error(`Wallet already exists at ${dataDir}`)
-    const config: ZimppyConfig = {
-      dataDir,
-      lwdServer: DEFAULT_LWD,
-      rpcEndpoint: DEFAULT_RPC,
-      network: 'testnet',
-    }
-    saveConfig(config)
-    console.error('Config saved.')
+    console.error(`Wallet '${name}' already exists.`)
     await walletWhoami()
     return
   }
 
-  // Need seed phrase to create wallet
-  console.error('Create a new wallet or restore from seed phrase.')
-  console.error('')
-  console.error('To create a new wallet, provide a BIP39 mnemonic:')
-  console.error(`  npx zimppy wallet init "your 24 word seed phrase here"`)
-  console.error('')
-  console.error('To generate a new seed phrase, use any BIP39 tool.')
-}
-
-async function walletInit(args: string[]): Promise<void> {
-  const phrase = args[0]
-  if (!phrase) {
-    console.error('Usage: zimppy wallet init "your 24 word seed phrase"')
-    console.error('')
-    console.error('Optional: zimppy wallet init "seed phrase" <birthday_height>')
-    process.exit(1)
-  }
-
-  const dataDir = process.env.ZIMPPY_WALLET_DIR ?? join(CONFIG_DIR, 'wallet')
   const config: ZimppyConfig = {
     dataDir,
     lwdServer: DEFAULT_LWD,
     rpcEndpoint: DEFAULT_RPC,
     network: 'testnet',
+    activeWallet: name,
   }
 
-  console.error('Creating wallet from seed phrase...')
+  console.error(`Creating wallet '${name}'...`)
+  try {
+    const wallet = await openWallet(config)
+    const addr = await wallet.address()
+    const seed = await wallet.seedPhrase()
+    console.error('')
+    console.error(`  Wallet '${name}' created!`)
+    console.error(`  Address: ${addr.slice(0, 25)}...${addr.slice(-15)}`)
+    if (seed) {
+      console.error('')
+      console.error('  === BACKUP YOUR SEED PHRASE ===')
+      console.error(`  ${seed}`)
+      console.error('  ===============================')
+      console.error('  Write this down and store it safely. You need it to recover your wallet.')
+    }
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+    process.exit(1)
+  }
+
+  saveConfig(config)
+  console.error('')
+  console.error('Run `npx zimppy wallet fund` to add testnet ZEC.')
+}
+
+async function walletRestore(args: string[]): Promise<void> {
+  const phrase = args[0]
+  if (!phrase) {
+    console.error('Usage: zimppy wallet restore "your 24 word seed phrase" [name] [birthday]')
+    process.exit(1)
+  }
+
+  const name = args[1] ?? 'default'
+  const dataDir = walletDir(name)
+  const config: ZimppyConfig = {
+    dataDir,
+    lwdServer: DEFAULT_LWD,
+    rpcEndpoint: DEFAULT_RPC,
+    network: 'testnet',
+    activeWallet: name,
+  }
+
+  console.error(`Restoring wallet '${name}' from seed phrase...`)
   try {
     const wallet = await openWallet(config, phrase)
     const addr = await wallet.address()
@@ -208,6 +237,62 @@ async function walletBalance(): Promise<void> {
     console.log(`  Total:     ${bal.totalZat} zat`)
     console.log(`  Network:   ${cfg.network}`)
     console.log(`---`)
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+  }
+}
+
+async function walletList(): Promise<void> {
+  if (!existsSync(WALLETS_DIR)) {
+    console.error('No wallets found. Run: zimppy wallet create')
+    return
+  }
+  const active = activeWalletName()
+  const dirs = readdirSync(WALLETS_DIR).filter(d =>
+    existsSync(join(WALLETS_DIR, d, 'zingo-wallet.dat'))
+  )
+  if (dirs.length === 0) {
+    console.error('No wallets found. Run: zimppy wallet create')
+    return
+  }
+  for (const name of dirs) {
+    const marker = name === active ? ' (active)' : ''
+    console.log(`  ${name}${marker}`)
+  }
+}
+
+async function walletUse(name?: string): Promise<void> {
+  if (!name) {
+    console.error('Usage: zimppy wallet use <name>')
+    process.exit(1)
+  }
+  const dataDir = walletDir(name)
+  if (!existsSync(join(dataDir, 'zingo-wallet.dat'))) {
+    console.error(`Wallet '${name}' does not exist. Run: zimppy wallet create ${name}`)
+    process.exit(1)
+  }
+  const config: ZimppyConfig = {
+    dataDir,
+    lwdServer: DEFAULT_LWD,
+    rpcEndpoint: DEFAULT_RPC,
+    network: 'testnet',
+    activeWallet: name,
+  }
+  saveConfig(config)
+  console.error(`Switched to wallet '${name}'`)
+  await walletWhoami()
+}
+
+async function walletSeed(): Promise<void> {
+  const cfg = requireConfig()
+  try {
+    const wallet = await openWallet(cfg)
+    const seed = await wallet.seedPhrase()
+    if (seed) {
+      console.log(seed)
+    } else {
+      console.error('Seed phrase not available (watch-only wallet)')
+    }
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
   }
@@ -607,10 +692,13 @@ async function main(): Promise<void> {
     console.log(`zimppy v${VERSION} — Private machine payments on Zcash
 
 Commands:
-  zimppy wallet login            Set up wallet
-  zimppy wallet init <seed>      Create wallet from seed phrase
+  zimppy wallet create [name]    Create a new wallet (default: "default")
+  zimppy wallet restore <seed>   Restore wallet from seed phrase
+  zimppy wallet list             List all wallets
+  zimppy wallet use <name>       Switch active wallet
   zimppy wallet whoami           Show address + balance + network
   zimppy wallet balance          Show balance
+  zimppy wallet seed             Show seed phrase (for backup)
   zimppy wallet fund             How to add funds
   zimppy wallet services         List available paid services
   zimppy request <URL>           Make HTTP request with auto-pay
@@ -640,15 +728,18 @@ Examples:
   if (cmd === 'wallet') {
     const sub = args[1]
     switch (sub) {
-      case 'login': return walletLogin()
-      case 'init': return walletInit(args.slice(2))
+      case 'create': return walletCreate(args.slice(2))
+      case 'restore': return walletRestore(args.slice(2))
+      case 'list': return walletList()
+      case 'use': return walletUse(args[2])
       case 'whoami': return walletWhoami()
       case 'balance': return walletBalance()
+      case 'seed': return walletSeed()
       case 'fund': return walletFund()
       case 'services': return walletServices(args.slice(2))
       default:
         console.error(`Unknown wallet command: ${sub}`)
-        console.error('Available: login, init, whoami, balance, fund, services')
+        console.error('Available: create, restore, list, use, whoami, balance, seed, fund, services')
         process.exit(1)
     }
   }

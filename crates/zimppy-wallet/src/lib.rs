@@ -50,23 +50,28 @@ impl ZimppyWallet {
             return Ok(Self { client });
         }
 
-        // Create or restore from seed
-        let phrase = wallet_config.seed_phrase
-            .ok_or(WalletError::NotInitialized)?;
-
-        let mnemonic = Mnemonic::from_phrase(phrase)
-            .map_err(|e| WalletError::InvalidSeed(format!("{e}")))?;
-
+        // Create from seed or fresh entropy
         let birthday = BlockHeight::from_u32(
             wallet_config.birthday_height.unwrap_or(3_906_900)
         );
 
-        let wallet = LightWallet::new(
-            zingo_config.chain,
-            WalletBase::Mnemonic {
-                mnemonic,
+        let wallet_base = match wallet_config.seed_phrase {
+            Some(phrase) => {
+                let mnemonic = Mnemonic::from_phrase(phrase)
+                    .map_err(|e| WalletError::InvalidSeed(format!("{e}")))?;
+                WalletBase::Mnemonic {
+                    mnemonic,
+                    no_of_accounts: NonZeroU32::new(1).expect("nonzero"),
+                }
+            }
+            None => WalletBase::FreshEntropy {
                 no_of_accounts: NonZeroU32::new(1).expect("nonzero"),
             },
+        };
+
+        let wallet = LightWallet::new(
+            zingo_config.chain,
+            wallet_base,
             birthday,
             zingo_config.wallet_settings.clone(),
         ).map_err(|e| WalletError::Client(format!("wallet creation failed: {e}")))?;
@@ -157,6 +162,11 @@ impl ZimppyWallet {
                 .map_err(|e| WalletError::Io(e))?;
         }
         Ok(())
+    }
+
+    /// Get the wallet's seed phrase (if available).
+    pub async fn seed_phrase(&self) -> Option<String> {
+        self.client.wallet.read().await.mnemonic_phrase()
     }
 
     /// Get the network name ("testnet" or "mainnet").
