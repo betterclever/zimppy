@@ -459,10 +459,10 @@ function createMppxClient(cfg: ZimppyConfig) {
           const txid = await sendViaWallet(cfg, {
             to: challenge.recipient,
             amountZat: challenge.amount,
-            memo: challenge.memo,
+            memo: challenge.methodDetails?.memo ?? '',
           })
 
-          return { txid, challengeId: challenge.challengeId }
+          return { txid }
         },
       }),
       sessionClient,

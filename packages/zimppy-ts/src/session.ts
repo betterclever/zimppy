@@ -20,11 +20,13 @@ export const sessionRequestSchema = z.object({
   amount: z.string(),
   currency: z.string(),
   recipient: z.string(),
-  network: z.enum(['testnet', 'mainnet']),
   depositAmount: z.optional(z.string()),
-  idleTimeout: z.optional(z.number()),
-  unitType: z.optional(z.string()),
-  memo: z.optional(z.string()),
+  methodDetails: z.optional(z.object({
+    network: z.optional(z.enum(['testnet', 'mainnet'])),
+    memo: z.optional(z.string()),
+    idleTimeout: z.optional(z.number()),
+    unitType: z.optional(z.string()),
+  })),
 })
 
 export const sessionCredentialPayloadSchema = z.discriminatedUnion('action', [
@@ -357,7 +359,8 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
 
   const client = Method.toClient(zcashSessionMethod, {
     async createCredential({ challenge }) {
-      const { recipient, amount, memo } = challenge.request
+      const { recipient, amount } = challenge.request
+      const memo = challenge.request.methodDetails?.memo
 
       // Close
       if (pendingClose && activeSession) {

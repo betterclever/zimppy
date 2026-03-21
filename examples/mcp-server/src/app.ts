@@ -59,25 +59,24 @@ export function createMcpApp(parameters: {
     ) {
       const parsed = zcashRequestSchema.parse(credential.challenge.request)
       console.error(`[MCP:${toolName}] Reusing echoed challenge`)
-      console.error(`[MCP:${toolName}]   challengeId=${parsed.challengeId}`)
       console.error(`[MCP:${toolName}]   amount=${parsed.amount}`)
-      console.error(`[MCP:${toolName}]   memo=${parsed.memo}`)
+      console.error(`[MCP:${toolName}]   memo=${parsed.methodDetails?.memo}`)
       return parsed
     }
 
     const challengeId = randomUUID()
     const fresh = {
       amount: toolPrices[toolName],
-      currency: 'ZEC',
+      currency: 'zec',
       recipient: walletConfig.address,
-      network: walletConfig.network,
-      memo: `zimppy:${challengeId}`,
-      challengeId,
+      methodDetails: {
+        network: walletConfig.network,
+        memo: `zimppy:${challengeId}`,
+      },
     }
     console.error(`[MCP:${toolName}] Issuing fresh challenge`)
-    console.error(`[MCP:${toolName}]   challengeId=${fresh.challengeId}`)
     console.error(`[MCP:${toolName}]   amount=${fresh.amount}`)
-    console.error(`[MCP:${toolName}]   memo=${fresh.memo}`)
+    console.error(`[MCP:${toolName}]   memo=${fresh.methodDetails.memo}`)
     return fresh
   }
 

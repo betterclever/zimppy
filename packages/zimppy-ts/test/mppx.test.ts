@@ -17,17 +17,17 @@ describe('zcash mppx method', () => {
       amount: '42000',
       currency: 'ZEC',
       recipient: 'utest1example',
-      network: 'testnet',
-      memo: 'zimppy:challenge-123',
-      challengeId: 'challenge-123',
+      methodDetails: {
+        network: 'testnet',
+        memo: 'zimppy:challenge-123',
+      },
     })
 
     const payload = zcashCredentialPayloadSchema.parse({
       txid: 'deadbeef',
-      challengeId: 'challenge-123',
     })
 
-    assert.equal(request.challengeId, 'challenge-123')
+    assert.equal(request.methodDetails?.memo, 'zimppy:challenge-123')
     assert.equal(payload.txid, 'deadbeef')
     assert.equal(zcashMethod.name, 'zcash')
     assert.equal(zcashMethod.intent, 'charge')
@@ -52,9 +52,10 @@ describe('zcashServer', () => {
         amount: '42000',
         currency: 'ZEC',
         recipient: 'utest1example',
-        network: 'testnet',
-        memo: 'zimppy:challenge-123',
-        challengeId: 'challenge-123',
+        methodDetails: {
+          network: 'testnet',
+          memo: 'zimppy:challenge-123',
+        },
       },
     })
 
@@ -107,9 +108,10 @@ describe('zcashServer', () => {
           amount: '55000',
           currency: 'ZEC',
           recipient: 'utest1example',
-          network: 'testnet',
-          memo: 'zimppy:challenge-native',
-          challengeId: 'challenge-native',
+          methodDetails: {
+            network: 'testnet',
+            memo: 'zimppy:challenge-native',
+          },
         },
       })
 
@@ -137,7 +139,7 @@ describe('zcashClient', () => {
     const client = zcashClient({
       source: 'did:key:test-client',
       createPayment: async ({ challenge }) => {
-        assert.equal(challenge.challengeId, 'challenge-client')
+        assert.equal(challenge.recipient, 'utest1example')
         return {
           txid: 'tx-client',
         }
@@ -151,9 +153,10 @@ describe('zcashClient', () => {
         amount: '75000',
         currency: 'ZEC',
         recipient: 'utest1example',
-        network: 'testnet',
-        memo: 'zimppy:challenge-client',
-        challengeId: 'challenge-client',
+        methodDetails: {
+          network: 'testnet',
+          memo: 'zimppy:challenge-client',
+        },
       },
     })
 
@@ -174,9 +177,10 @@ describe('zcashClient', () => {
         amount: '10000',
         currency: 'ZEC',
         recipient: 'utest1example',
-        network: 'testnet',
-        memo: 'zimppy:challenge-missing',
-        challengeId: 'challenge-missing',
+        methodDetails: {
+          network: 'testnet',
+          memo: 'zimppy:challenge-missing',
+        },
       },
     })
 
@@ -197,9 +201,10 @@ describe('zcashClient', () => {
         amount: '10000',
         currency: 'ZEC',
         recipient: 'utest1example',
-        network: 'testnet',
-        memo: 'zimppy:challenge-cast',
-        challengeId: 'challenge-cast',
+        methodDetails: {
+          network: 'testnet',
+          memo: 'zimppy:challenge-cast',
+        },
       },
     })
 

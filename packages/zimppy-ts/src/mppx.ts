@@ -5,15 +5,14 @@ export const zcashRequestSchema = z.object({
   amount: z.string(),
   currency: z.string(),
   recipient: z.string(),
-  network: z.enum(['testnet', 'mainnet']),
-  memo: z.string(),
-  challengeId: z.string(),
-  expiresAt: z.optional(z.number()),
+  methodDetails: z.optional(z.object({
+    network: z.optional(z.enum(['testnet', 'mainnet'])),
+    memo: z.optional(z.string()),
+  })),
 })
 
 export const zcashCredentialPayloadSchema = z.object({
   txid: z.string(),
-  challengeId: z.optional(z.string()),
 })
 
 export const zcashMethod = Method.from({
@@ -50,7 +49,7 @@ export function zcash(options: ZcashServerOptions) {
   return Method.toServer(zcashMethod, {
     async verify({ credential, request }) {
       const txid = credential.payload.txid
-      const challengeId = request.challengeId || credential.payload.challengeId || credential.challenge.id
+      const challengeId = credential.challenge.id
       const amount = request.amount
 
       const result = options.verifyPayment
@@ -78,7 +77,6 @@ export function zcash(options: ZcashServerOptions) {
 }
 
 export interface ZcashClientPayment {
-  challengeId?: string
   source?: string
   txid: string
 }
@@ -106,7 +104,6 @@ export function zcashClient(options: ZcashClientOptions = {}) {
           challenge,
           payload: {
             txid: payment.txid,
-            ...(payment.challengeId ? { challengeId: payment.challengeId } : {}),
           },
           ...(payment.source ?? options.source ? { source: payment.source ?? options.source } : {}),
         }),
