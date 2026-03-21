@@ -423,7 +423,8 @@ async function sendViaWallet(cfg: ZimppyConfig, params: { to: string; amountZat:
 
   const wallet = await openWallet(cfg)
   process.stderr.write('  Syncing wallet...')
-  await wallet.sync()
+  // Multiple syncs needed after recent transactions to update shard tree
+  for (let i = 0; i < 3; i++) await wallet.sync()
   console.error(' done')
 
   process.stderr.write('  Broadcasting transaction...')

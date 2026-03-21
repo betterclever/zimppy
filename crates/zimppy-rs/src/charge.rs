@@ -97,11 +97,11 @@ impl mpp::protocol::traits::ChargeMethod for ZcashChargeMethod {
 
         async move {
             let amount: u64 = amount_str.parse().map_err(|_| mpp::protocol::traits::VerificationError::new("invalid amount"))?;
-            let txid = credential.charge_payload()
-                .map(|p| p.data().to_string())
-                .map_err(|e| mpp::protocol::traits::VerificationError::new(
-                    format!("failed to parse credential payload: {e}")
-                ))?;
+            // Parse txid from payload (Zcash uses {txid: "..."}, not Tempo's {type, hash})
+            let txid = credential.payload.get("txid")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| mpp::protocol::traits::VerificationError::new("missing txid in payload"))?
+                .to_string();
             let challenge_id = credential.challenge.id.clone();
             let req = shielded::ShieldedVerifyRequest {
                 txid: txid.clone(),
