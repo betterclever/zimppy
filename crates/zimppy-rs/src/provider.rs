@@ -129,8 +129,7 @@ impl PaymentProvider for ZcashPaymentProvider {
         let mut credential = PaymentCredential::new(echo, payload);
 
         credential.payload = serde_json::json!({
-            "type": "hash",
-            "hash": txid,
+            "txid": txid,
             "challengeId": challenge_id,
         });
 

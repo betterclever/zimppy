@@ -113,7 +113,7 @@ impl ZcashSessionMethod {
                 self.handle_top_up(&session_id, &top_up_txid).await
             }
             SessionPayload::Close { session_id, bearer } => {
-                self.handle_close(&session_id, &bearer)
+                self.handle_close(&session_id, &bearer).await
             }
         }
     }
@@ -259,49 +259,62 @@ impl ZcashSessionMethod {
         })
     }
 
-    fn handle_close(
+    async fn handle_close(
         &self,
         session_id: &str,
         bearer: &str,
     ) -> Result<SessionVerifyResult, SessionError> {
-        let mut sessions = self.sessions.lock()
-            .map_err(|_| SessionError::LockError)?;
+        // Collect everything we need from the lock in a non-async block,
+        // so the MutexGuard is dropped before any .await point.
+        let (refund_amount, cfg_clone, refund_addr, sid) = {
+            let mut sessions = self.sessions.lock()
+                .map_err(|_| SessionError::LockError)?;
 
-        let state = sessions.get_mut(session_id)
-            .ok_or_else(|| SessionError::SessionNotFound(session_id.to_string()))?;
+            let state = sessions.get_mut(session_id)
+                .ok_or_else(|| SessionError::SessionNotFound(session_id.to_string()))?;
 
-        if state.status == SessionStatus::Closed {
-            return Err(SessionError::SessionNotActive(session_id.to_string()));
-        }
+            if state.status == SessionStatus::Closed || state.status == SessionStatus::Closing {
+                return Err(SessionError::SessionNotActive(session_id.to_string()));
+            }
 
-        if sha256_hex(bearer) != state.bearer_hash {
-            return Err(SessionError::InvalidBearer);
-        }
+            if sha256_hex(bearer) != state.bearer_hash {
+                return Err(SessionError::InvalidBearer);
+            }
 
-        state.status = SessionStatus::Closing;
+            state.status = SessionStatus::Closing;
 
-        let refund_amount = state.deposit_amount_zat.saturating_sub(state.spent_zat);
-        eprintln!("[session:close] {session_id}: refund={refund_amount} to {}", &state.refund_address[..20.min(state.refund_address.len())]);
+            let refund_amount = state.deposit_amount_zat.saturating_sub(state.spent_zat);
+            eprintln!("[session:close] {session_id}: refund={refund_amount} to {}", &state.refund_address[..20.min(state.refund_address.len())]);
 
-        let actual_refund_txid: Option<String> = None;
+            (refund_amount, self.refund_config.clone(), state.refund_address.clone(), session_id.to_string())
+        }; // MutexGuard dropped here
 
-        if refund_amount > 0 {
-            if let Some(ref cfg) = self.refund_config {
+        let actual_refund_txid = if refund_amount > 0 {
+            if let Some(ref cfg) = cfg_clone {
                 eprintln!("[session:close] Sending refund of {refund_amount} zat...");
-
-                let refund_cfg = cfg.clone();
-                let refund_addr = state.refund_address.clone();
-                let sid = session_id.to_string();
-                tokio::spawn(async move {
-                    match send_refund(&refund_cfg, &refund_addr, refund_amount, &sid).await {
-                        Ok(txid) => eprintln!("[session:close] Refund sent: {txid}"),
-                        Err(e) => eprintln!("[session:close] Refund send failed: {e}"),
+                match send_refund(cfg, &refund_addr, refund_amount, &sid).await {
+                    Ok(txid) => {
+                        eprintln!("[session:close] Refund sent: {txid}");
+                        Some(txid)
                     }
-                });
+                    Err(e) => {
+                        eprintln!("[session:close] Refund send failed: {e}");
+                        None
+                    }
+                }
             } else {
                 eprintln!("[session:close] No refund config — skipping refund of {refund_amount} zat");
+                None
             }
-        }
+        } else {
+            None
+        };
+
+        // Re-acquire the lock to mark session as closed.
+        let mut sessions = self.sessions.lock()
+            .map_err(|_| SessionError::LockError)?;
+        let state = sessions.get_mut(&sid)
+            .ok_or_else(|| SessionError::SessionNotFound(sid.clone()))?;
 
         state.status = SessionStatus::Closed;
         eprintln!("[session:close] {session_id} closed. Total spent: {}", state.spent_zat);
