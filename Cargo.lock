@@ -8276,7 +8276,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-ai-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -8294,7 +8294,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "bech32 0.9.1",
@@ -8320,7 +8320,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-napi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "napi",
  "napi-build",
@@ -8333,7 +8333,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-rs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-lite",
  "hex",
@@ -8348,7 +8348,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-rust-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -8365,7 +8365,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-wallet"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bip0039",
  "dirs",
