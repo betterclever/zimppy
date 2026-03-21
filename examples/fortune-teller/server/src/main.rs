@@ -1,20 +1,20 @@
-use std::collections::HashMap;
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use hmac::{Hmac, Mac};
 use serde::Deserialize;
-use sha2::Sha256;
 
+use mpp::compute_challenge_id;
+use mpp::parse_authorization;
+use mpp::protocol::core::{Base64UrlJson, PaymentChallenge};
+use mpp::protocol::intents::{ChargeRequest, SessionRequest};
+use mpp::server::Mpp;
 use zimppy_rs::{ZcashChargeMethod, ZcashSessionMethod};
 use zimppy_rs::session::RefundConfig;
-
-type HmacSha256 = Hmac<Sha256>;
 
 const PROBLEM_JSON: &str = "application/problem+json";
 
@@ -27,24 +27,13 @@ struct ServerWalletConfig {
 }
 
 struct AppState {
-    payment: ZcashChargeMethod,
+    mpp: Mpp<ZcashChargeMethod, ZcashSessionMethod>,
+    /// Keep a clone for direct session access (deduct, get_session for SSE streaming).
     session: ZcashSessionMethod,
     config: ServerWalletConfig,
     amount_zat: u64,
+    /// Needed for challenge creation (Mpp doesn't expose its secret_key).
     secret_key: String,
-    /// Maps challenge_id -> (amount_zat, timestamp)
-    challenges: Mutex<HashMap<String, (u64, u64)>>,
-}
-
-/// Generate HMAC-SHA256 challenge ID per MPP spec.
-/// id = HMAC-SHA256(secret, realm|method|intent|request_b64|expires|nonce|scope)
-fn generate_challenge_id(secret: &str, realm: &str, method: &str, intent: &str, request_b64: &str, expires: &str) -> String {
-    let payload = format!("{realm}|{method}|{intent}|{request_b64}|{expires}||");
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC can take key of any size");
-    mac.update(payload.as_bytes());
-    let result = mac.finalize();
-    base64url_encode(&result.into_bytes())
 }
 
 #[tokio::main]
@@ -79,9 +68,9 @@ async fn main() {
     eprintln!("  price: {} zat per request", price);
     eprintln!("  RPC: {rpc_endpoint}");
     eprintln!("  port: {port}");
-    eprintln!("  challenge IDs: HMAC-SHA256");
+    eprintln!("  challenge IDs: HMAC-SHA256 (via mpp-rs)");
 
-    let payment = ZcashChargeMethod::new(&rpc_endpoint, &config.address, &config.orchard_ivk);
+    let charge = ZcashChargeMethod::new(&rpc_endpoint, &config.address, &config.orchard_ivk);
 
     let wallet_dir = std::env::var("ZIMPPY_WALLET_DIR")
         .unwrap_or_else(|_| "/tmp/zimppy-server-wallet".to_string());
@@ -98,13 +87,15 @@ async fn main() {
             birthday_height: None,
         });
 
+    let mpp = Mpp::new(charge, "zimppy", &secret_key)
+        .with_session_method(session.clone());
+
     let state = Arc::new(AppState {
-        payment,
+        mpp,
         session,
         config,
         amount_zat: price,
         secret_key,
-        challenges: Mutex::new(HashMap::new()),
     });
 
     let app = Router::new()
@@ -117,7 +108,6 @@ async fn main() {
         .with_state(state.clone());
 
     eprintln!("  stream endpoint: /api/stream/fortune (SSE, 1000 zat/token)");
-
     eprintln!("  session endpoint: /api/session/fortune");
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
@@ -133,7 +123,7 @@ async fn main() {
         .unwrap_or_else(|e| panic!("server error: {e}"));
 }
 
-// ── Item 3: Discovery endpoint ──────────────────────────────────────────
+// ── Discovery endpoint ──────────────────────────────────────────
 
 async fn discovery(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(serde_json::json!({
@@ -151,162 +141,201 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok", "service": "zimppy-mpp-server" }))
 }
 
+// ── Charge endpoint ─────────────────────────────────────────────
+
 async fn fortune(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Some(auth) = headers.get(header::AUTHORIZATION) {
-        if let Ok(auth_str) = auth.to_str() {
-            if auth_str.starts_with("Payment ") {
-                return handle_payment(state, auth_str).await;
+    if let Some(credential) = parse_credential(&headers) {
+        match state.mpp.verify_credential(&credential).await {
+            Ok(receipt) => {
+                let receipt_header = receipt.to_header().unwrap_or_default();
+                let fortune = pick_fortune();
+                eprintln!("[200] Payment verified! Serving fortune: {fortune}");
+                return (
+                    StatusCode::OK,
+                    [
+                        ("payment-receipt", receipt_header),
+                        ("cache-control", "private".to_string()),
+                    ],
+                    Json(serde_json::json!({ "fortune": fortune })),
+                ).into_response();
+            }
+            Err(e) => {
+                eprintln!("[VERIFY] Error: {e}");
+                // Fall through to issue new challenge
             }
         }
     }
-    issue_challenge(state).await
+    issue_charge_challenge(&state).into_response()
 }
 
-// ── Session endpoint ────────────────────────────────────────────────────
+fn issue_charge_challenge(state: &AppState) -> axum::response::Response {
+    let request = ChargeRequest {
+        amount: state.amount_zat.to_string(),
+        currency: "zec".to_string(),
+        recipient: Some(state.config.address.clone()),
+        method_details: Some(serde_json::json!({
+            "memo": "zimppy:{id}",
+            "network": state.config.network,
+        })),
+        ..Default::default()
+    };
+
+    match build_challenge(state, "charge", &request) {
+        Ok(challenge) => {
+            let memo_display = format!("zimppy:{}", challenge.id);
+            eprintln!("[402] Issuing challenge:");
+            eprintln!("  challenge_id: {}", challenge.id);
+            eprintln!("  recipient: {}", state.config.address);
+            eprintln!("  amount: {} zat", state.amount_zat);
+            eprintln!("  memo: {memo_display}");
+
+            let www_auth = challenge.to_header().unwrap_or_default();
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [
+                    (header::WWW_AUTHENTICATE, www_auth),
+                    (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
+                    (header::CACHE_CONTROL, "no-store".to_string()),
+                ],
+                Json(serde_json::json!({
+                    "type": "https://paymentauth.org/problems/payment-required",
+                    "title": "Payment Required",
+                    "status": 402,
+                    "detail": format!("Send {} zat to {} with memo '{}'", state.amount_zat, state.config.address, memo_display),
+                })),
+            ).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ── Session endpoint ────────────────────────────────────────────
 
 async fn session_fortune(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Some(auth) = headers.get(header::AUTHORIZATION) {
-        if let Ok(auth_str) = auth.to_str() {
-            if auth_str.starts_with("Payment ") {
-                return handle_session_payment(state, auth_str).await;
-            }
-        }
-    }
-    // No credential — issue session challenge (intent=session)
-    issue_session_challenge(state).await
-}
+    if let Some(credential) = parse_credential(&headers) {
+        match state.mpp.verify_session(&credential).await {
+            Ok(result) => {
+                let receipt_header = result.receipt.to_header().unwrap_or_default();
 
-async fn handle_session_payment(state: Arc<AppState>, auth_str: &str) -> axum::response::Response {
-    let encoded = auth_str.trim_start_matches("Payment ").trim();
-    eprintln!("[SESSION] Received credential");
+                // Management response (open, close, topUp)
+                if let Some(mgmt) = result.management_response {
+                    eprintln!("[SESSION:200] Management response");
+                    return (
+                        StatusCode::OK,
+                        [
+                            ("payment-receipt", receipt_header),
+                            ("cache-control", "private".to_string()),
+                        ],
+                        Json(mgmt),
+                    ).into_response();
+                }
 
-    let bytes = match base64url_decode(encoded) {
-        Ok(b) => b,
-        Err(_) => return problem_response(402, "Invalid Credential", "invalid base64url", "malformed-credential"),
-    };
-    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(e) => return problem_response(402, "Invalid Credential", &format!("invalid JSON: {e}"), "malformed-credential"),
-    };
-
-    let payload = match value.get("payload") {
-        Some(p) => p.clone(),
-        None => return problem_response(402, "Invalid Credential", "missing payload", "malformed-credential"),
-    };
-
-    let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
-    eprintln!("[SESSION] Action: {action}");
-
-    match state.session.verify_session(&payload, state.amount_zat).await {
-        Ok(result) => {
-            eprintln!("[SESSION] Result: session_id={}, action={}, management={}",
-                result.session_id, result.action, result.is_management);
-
-            let receipt = serde_json::json!({
-                "status": "success",
-                "method": "zcash",
-                "reference": result.session_id,
-                "action": result.action,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            });
-            let encoded_receipt = base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
-
-            if result.is_management {
-                // Management actions (open, topUp, close) → return JSON directly
-                (
-                    StatusCode::OK,
-                    [
-                        ("payment-receipt", encoded_receipt),
-                        ("cache-control", "private".to_string()),
-                    ],
-                    Json(serde_json::json!({
-                        "status": "ok",
-                        "sessionId": result.session_id,
-                        "action": result.action,
-                        "refundTxid": result.refund_txid,
-                        "refundAmountZat": result.refund_amount_zat,
-                    })),
-                )
-                    .into_response()
-            } else {
-                // Bearer action → serve content
+                // Content response (bearer)
                 let fortune = pick_fortune();
                 eprintln!("[SESSION:200] Serving fortune via session: {fortune}");
-                (
+                return (
                     StatusCode::OK,
                     [
-                        ("payment-receipt", encoded_receipt),
+                        ("payment-receipt", receipt_header),
                         ("cache-control", "private".to_string()),
                     ],
                     Json(serde_json::json!({ "fortune": fortune })),
-                )
-                    .into_response()
+                ).into_response();
+            }
+            Err(e) => {
+                eprintln!("[SESSION] Error: {e}");
+                // Fall through to issue new challenge
             }
         }
-        Err(e) => {
-            eprintln!("[SESSION] ERROR: {e}");
-            problem_response(402, "Session Error", &e.to_string(), "payment-required")
+    }
+    issue_session_challenge(&state).into_response()
+}
+
+fn issue_session_challenge(state: &AppState) -> axum::response::Response {
+    let deposit_amount = state.amount_zat * 10;
+
+    let request = SessionRequest {
+        amount: state.amount_zat.to_string(),
+        currency: "zec".to_string(),
+        recipient: Some(state.config.address.clone()),
+        suggested_deposit: Some(deposit_amount.to_string()),
+        method_details: Some(serde_json::json!({
+            "memo": "zimppy:{id}",
+            "network": state.config.network,
+        })),
+        ..Default::default()
+    };
+
+    match build_challenge(state, "session", &request) {
+        Ok(challenge) => {
+            let memo_display = format!("zimppy:{}", challenge.id);
+            eprintln!("[402] Issuing session challenge:");
+            eprintln!("  challenge_id: {}", challenge.id);
+            eprintln!("  recipient: {}", state.config.address);
+            eprintln!("  amount: {} zat", state.amount_zat);
+            eprintln!("  memo: {memo_display}");
+
+            let www_auth = challenge.to_header().unwrap_or_default();
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [
+                    (header::WWW_AUTHENTICATE, www_auth),
+                    (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
+                    (header::CACHE_CONTROL, "no-store".to_string()),
+                ],
+                Json(serde_json::json!({
+                    "type": "https://paymentauth.org/problems/payment-required",
+                    "title": "Payment Required",
+                    "status": 402,
+                    "detail": format!("Open a session by depositing {} zat to {} with memo '{}'", deposit_amount, state.config.address, memo_display),
+                })),
+            ).into_response()
         }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-// ── SSE Streaming endpoint ──────────────────────────────────────────────
+// ── SSE Streaming endpoint ──────────────────────────────────────
 
 async fn stream_fortune(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
     // Must have a session credential (bearer action)
-    let auth = match headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
-        Some(a) if a.starts_with("Payment ") => a,
-        _ => return issue_session_challenge(state).await,
+    let credential = match parse_credential(&headers) {
+        Some(c) => c,
+        None => return issue_session_challenge(&state).into_response(),
     };
 
-    let encoded = auth.trim_start_matches("Payment ").trim();
-    let bytes = match base64url_decode(encoded) {
-        Ok(b) => b,
-        Err(_) => return problem_response(402, "Invalid Credential", "invalid base64url", "malformed-credential"),
-    };
-    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(e) => return problem_response(402, "Invalid Credential", &format!("invalid JSON: {e}"), "malformed-credential"),
-    };
-    let payload = match value.get("payload") {
-        Some(p) => p.clone(),
-        None => return problem_response(402, "Invalid Credential", "missing payload", "malformed-credential"),
+    // Verify via Mpp (HMAC + expiry + session method)
+    let result = match state.mpp.verify_session(&credential).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[STREAM] Verify error: {e}");
+            return issue_session_challenge(&state).into_response();
+        }
     };
 
-    let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("");
-    if action != "bearer" {
-        return problem_response(400, "Invalid Action", "stream requires bearer action", "invalid-action");
+    // Management actions should not go to streaming
+    if result.management_response.is_some() {
+        let receipt_header = result.receipt.to_header().unwrap_or_default();
+        return (
+            StatusCode::OK,
+            [
+                ("payment-receipt", receipt_header),
+                ("cache-control", "private".to_string()),
+            ],
+            Json(result.management_response.unwrap()),
+        ).into_response();
     }
 
-    let session_id = payload.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
-    let bearer = payload.get("bearer").and_then(|b| b.as_str()).unwrap_or("");
-
-    // Verify bearer is valid
-    let bearer_hash = {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(bearer.as_bytes());
-        hex::encode(hasher.finalize())
-    };
-
-    let session_state = match state.session.get_session(&session_id) {
-        Some(s) => s,
-        None => return problem_response(402, "Session Not Found", "session not found", "payment-required"),
-    };
-
-    if session_state.bearer_hash != bearer_hash {
-        return problem_response(402, "Invalid Bearer", "invalid bearer token", "payment-required");
-    }
-
+    let session_id = result.receipt.reference.clone();
     eprintln!("[STREAM] Starting SSE stream for session {session_id}");
 
     // Generate fortune tokens word by word
@@ -375,230 +404,55 @@ async fn stream_fortune(
     axum::response::sse::Sse::new(stream).into_response()
 }
 
-// ── Items 1+2: HMAC challenge IDs + RFC 9457 problem details ────────────
+// ── Challenge construction ──────────────────────────────────────
 
-async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
-    // Keys MUST be alphabetical — mppx re-serializes with JSON.stringify after
-    // Zod parsing, which sorts keys. The HMAC depends on exact byte equality.
-    let request_payload = serde_json::json!({
-        "amount": state.amount_zat.to_string(),
-        "currency": "zec",
-        "methodDetails": {
-            "memo": "zimppy:{id}",
-            "network": state.config.network,
-        },
-        "recipient": state.config.address,
-    });
+/// Build a PaymentChallenge for the Zcash method using mpp-rs HMAC.
+fn build_challenge<T: serde::Serialize>(
+    state: &AppState,
+    intent: &str,
+    request: &T,
+) -> Result<PaymentChallenge, mpp::MppError> {
+    let encoded = Base64UrlJson::from_typed(request)?;
 
-    let encoded_request = base64url_encode(&serde_json::to_vec(&request_payload).unwrap_or_default());
-
-    let expires_rfc3339 = chrono::Utc::now()
+    let expires = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::seconds(600))
         .unwrap_or_else(chrono::Utc::now)
         .to_rfc3339();
 
-    let challenge_id = generate_challenge_id(
-        &state.secret_key, "zimppy", "zcash", "charge", &encoded_request, &expires_rfc3339,
+    let id = compute_challenge_id(
+        &state.secret_key,
+        state.mpp.realm(),
+        state.mpp.method_name(),
+        intent,
+        encoded.raw(),
+        Some(&expires),
+        None,
+        None,
     );
 
-    let memo_display = format!("zimppy:{challenge_id}");
-
-    eprintln!("[402] Issuing challenge:");
-    eprintln!("  challenge_id: {challenge_id}");
-    eprintln!("  recipient: {}", state.config.address);
-    eprintln!("  amount: {} zat", state.amount_zat);
-    eprintln!("  memo: {memo_display}");
-
-    if let Ok(mut challenges) = state.challenges.lock() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        challenges.insert(challenge_id.clone(), (state.amount_zat, now));
-    }
-
-    let www_auth = format!(
-        "Payment id=\"{challenge_id}\", realm=\"zimppy\", method=\"zcash\", intent=\"charge\", request=\"{encoded_request}\", expires=\"{expires_rfc3339}\""
-    );
-
-    // Item 2: RFC 9457 problem details with application/problem+json
-    (
-        StatusCode::PAYMENT_REQUIRED,
-        [
-            (header::WWW_AUTHENTICATE, www_auth),
-            (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
-            (header::CACHE_CONTROL, "no-store".to_string()),
-        ],
-        Json(serde_json::json!({
-            "type": "https://paymentauth.org/problems/payment-required",
-            "title": "Payment Required",
-            "status": 402,
-            "detail": format!("Send {} zat to {} with memo '{}'", state.amount_zat, state.config.address, memo_display),
-        })),
-    )
-        .into_response()
+    Ok(PaymentChallenge {
+        id,
+        realm: state.mpp.realm().to_string(),
+        method: state.mpp.method_name().into(),
+        intent: intent.into(),
+        request: encoded,
+        expires: Some(expires),
+        description: None,
+        digest: None,
+        opaque: None,
+    })
 }
 
-async fn issue_session_challenge(state: Arc<AppState>) -> axum::response::Response {
-    let deposit_amount = state.amount_zat * 10;
+// ── Helpers ─────────────────────────────────────────────────────
 
-    // Keys MUST be alphabetical — mppx re-serializes with JSON.stringify after
-    // Zod parsing, which sorts keys. The HMAC depends on exact byte equality.
-    let request_payload = serde_json::json!({
-        "amount": state.amount_zat.to_string(),
-        "currency": "zec",
-        "depositAmount": deposit_amount.to_string(),
-        "methodDetails": {
-            "memo": "zimppy:{id}",
-            "network": state.config.network,
-        },
-        "recipient": state.config.address,
-    });
-
-    let encoded_request = base64url_encode(&serde_json::to_vec(&request_payload).unwrap_or_default());
-
-    let expires_rfc3339 = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::seconds(600))
-        .unwrap_or_else(chrono::Utc::now)
-        .to_rfc3339();
-
-    let challenge_id = generate_challenge_id(
-        &state.secret_key, "zimppy", "zcash", "session", &encoded_request, &expires_rfc3339,
-    );
-
-    let memo_display = format!("zimppy:{challenge_id}");
-
-    eprintln!("[402] Issuing session challenge:");
-    eprintln!("  challenge_id: {challenge_id}");
-    eprintln!("  recipient: {}", state.config.address);
-    eprintln!("  amount: {} zat", state.amount_zat);
-    eprintln!("  memo: {memo_display}");
-
-    if let Ok(mut challenges) = state.challenges.lock() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        challenges.insert(challenge_id.clone(), (state.amount_zat, now));
-    }
-
-    let www_auth = format!(
-        "Payment id=\"{challenge_id}\", realm=\"zimppy\", method=\"zcash\", intent=\"session\", request=\"{encoded_request}\", expires=\"{expires_rfc3339}\""
-    );
-
-    (
-        StatusCode::PAYMENT_REQUIRED,
-        [
-            (header::WWW_AUTHENTICATE, www_auth),
-            (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
-            (header::CACHE_CONTROL, "no-store".to_string()),
-        ],
-        Json(serde_json::json!({
-            "type": "https://paymentauth.org/problems/payment-required",
-            "title": "Payment Required",
-            "status": 402,
-            "detail": format!("Open a session by depositing {} zat to {} with memo '{}'", deposit_amount, state.config.address, memo_display),
-        })),
-    )
-        .into_response()
-}
-
-async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response::Response {
-    let encoded = auth_str.trim_start_matches("Payment ").trim();
-
-    eprintln!("[AUTH] Received credential");
-
-    let cred = match decode_credential(encoded) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[AUTH] ERROR: invalid credential: {e}");
-            return problem_response(402, "Invalid Credential", &format!("invalid credential: {e}"), "malformed-credential");
-        }
-    };
-
-    let txid = &cred.txid;
-    let challenge_id = &cred.challenge_id;
-
-    eprintln!("[AUTH] txid: {txid}");
-    eprintln!("[AUTH] challenge_id (from echoed challenge): {challenge_id}");
-
-    // Stateless HMAC verification: recompute the challenge ID from echoed fields
-    let recomputed_id = generate_challenge_id(
-        &state.secret_key, &cred.realm, &cred.method, &cred.intent, &cred.request_b64, &cred.expires,
-    );
-
-    if recomputed_id != *challenge_id {
-        eprintln!("[AUTH] ERROR: HMAC verification failed (recomputed={recomputed_id}, echoed={challenge_id})");
-        return problem_response(402, "Invalid Challenge", "challenge HMAC verification failed", "invalid-challenge");
-    }
-
-    eprintln!("[AUTH] HMAC verification passed (stateless)");
-
-    // Secondary check: also verify against HashMap if available
-    let amount_zat = match state.challenges.lock() {
-        Ok(challenges) => {
-            match challenges.get(challenge_id.as_str()) {
-                Some(&(amount, _)) => amount,
-                None => {
-                    // HMAC passed but not in HashMap — use default amount
-                    eprintln!("[AUTH] challenge not in HashMap, using default amount");
-                    state.amount_zat
-                }
-            }
-        }
-        Err(_) => {
-            return problem_response(500, "Internal Error", "lock error", "internal-error");
-        }
-    };
-
-    eprintln!("[VERIFY] Verifying shielded payment...");
-    eprintln!("[VERIFY] amount: {amount_zat} zat, challenge: {challenge_id}");
-
-    match state.payment.verify_payment(txid, challenge_id, amount_zat).await {
-        Ok(outcome) => {
-            eprintln!("[VERIFY] Result: verified={} amount={} memo_matched={} decrypted={}",
-                outcome.verified, outcome.observed_amount_zat, outcome.memo_matched, outcome.outputs_decrypted);
-
-            if outcome.verified {
-                if let Ok(mut challenges) = state.challenges.lock() {
-                    challenges.remove(challenge_id.as_str());
-                }
-
-                let receipt = serde_json::json!({
-                    "status": "success",
-                    "method": "zcash",
-                    "reference": outcome.txid,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                });
-                let encoded_receipt =
-                    base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
-
-                let fortune = pick_fortune();
-                eprintln!("[200] Payment verified! Serving fortune.");
-                eprintln!("[200] Fortune: {fortune}");
-
-                (
-                    StatusCode::OK,
-                    [
-                        ("payment-receipt", encoded_receipt),
-                        ("cache-control", "private".to_string()),
-                    ],
-                    Json(serde_json::json!({ "fortune": fortune })),
-                )
-                    .into_response()
-            } else {
-                eprintln!("[402] Payment not verified: amount or memo mismatch");
-                problem_response(402, "Payment Not Verified", "amount or memo mismatch", "verification-failed")
-            }
-        }
-        Err(e) => {
-            eprintln!("[VERIFY] ERROR: {e}");
-            problem_response(402, "Verification Failed", &e.to_string(), "verification-failed")
-        }
-    }
+fn parse_credential(headers: &HeaderMap) -> Option<mpp::PaymentCredential> {
+    headers.get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| parse_authorization(s).ok())
 }
 
 /// RFC 9457 problem details response helper
+#[allow(dead_code)]
 fn problem_response(status: u16, title: &str, detail: &str, problem_type: &str) -> axum::response::Response {
     let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     (
@@ -612,58 +466,6 @@ fn problem_response(status: u16, title: &str, detail: &str, problem_type: &str) 
         })),
     )
         .into_response()
-}
-
-struct DecodedCredential {
-    txid: String,
-    challenge_id: String,
-    realm: String,
-    method: String,
-    intent: String,
-    request_b64: String,
-    expires: String,
-}
-
-fn decode_credential(encoded: &str) -> Result<DecodedCredential, String> {
-    let bytes = base64url_decode(encoded).map_err(|_| "invalid base64url".to_string())?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("invalid JSON: {e}"))?;
-    let txid = value
-        .pointer("/payload/txid")
-        .and_then(|v| v.as_str())
-        .ok_or("missing payload.txid")?
-        .to_string();
-    let challenge_id = value
-        .pointer("/challenge/id")
-        .and_then(|v| v.as_str())
-        .ok_or("missing challenge.id")?
-        .to_string();
-    let realm = value
-        .pointer("/challenge/realm")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let method = value
-        .pointer("/challenge/method")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let intent = value
-        .pointer("/challenge/intent")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let request_b64 = value
-        .pointer("/challenge/request")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let expires = value
-        .pointer("/challenge/expires")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    Ok(DecodedCredential { txid, challenge_id, realm, method, intent, request_b64, expires })
 }
 
 fn pick_fortune() -> &'static str {
@@ -680,61 +482,4 @@ fn pick_fortune() -> &'static str {
         .subsec_nanos() as usize
         % fortunes.len();
     fortunes[idx]
-}
-
-fn base64url_encode(data: &[u8]) -> String {
-    use std::io::Write;
-    let mut buf = Vec::new();
-    let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut i = 0;
-    while i + 2 < data.len() {
-        let (b0, b1, b2) = (data[i], data[i + 1], data[i + 2]);
-        let _ = buf.write_all(&[
-            table[(b0 >> 2) as usize],
-            table[((b0 & 0x03) << 4 | b1 >> 4) as usize],
-            table[((b1 & 0x0f) << 2 | b2 >> 6) as usize],
-            table[(b2 & 0x3f) as usize],
-        ]);
-        i += 3;
-    }
-    let remaining = data.len() - i;
-    if remaining == 2 {
-        let (b0, b1) = (data[i], data[i + 1]);
-        let _ = buf.write_all(&[
-            table[(b0 >> 2) as usize],
-            table[((b0 & 0x03) << 4 | b1 >> 4) as usize],
-            table[((b1 & 0x0f) << 2) as usize],
-        ]);
-    } else if remaining == 1 {
-        let b0 = data[i];
-        let _ = buf.write_all(&[
-            table[(b0 >> 2) as usize],
-            table[((b0 & 0x03) << 4) as usize],
-        ]);
-    }
-    String::from_utf8(buf).unwrap_or_default()
-}
-
-fn base64url_decode(input: &str) -> Result<Vec<u8>, ()> {
-    let input = input.replace('-', "+").replace('_', "/");
-    let padded = match input.len() % 4 {
-        2 => format!("{input}=="),
-        3 => format!("{input}="),
-        _ => input,
-    };
-    let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = Vec::new();
-    let chars: Vec<u8> = padded.bytes().collect();
-    for chunk in chars.chunks(4) {
-        if chunk.len() < 4 { break; }
-        let mut buf = [0u8; 4];
-        for (i, &b) in chunk.iter().enumerate() {
-            if b == b'=' { buf[i] = 0; }
-            else { buf[i] = table.iter().position(|&t| t == b).ok_or(())? as u8; }
-        }
-        output.push((buf[0] << 2) | (buf[1] >> 4));
-        if chunk[2] != b'=' { output.push((buf[1] << 4) | (buf[2] >> 2)); }
-        if chunk[3] != b'=' { output.push((buf[2] << 6) | buf[3]); }
-    }
-    Ok(output)
 }

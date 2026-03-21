@@ -11,9 +11,7 @@ path = "src/main.rs"
 [dependencies]
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-hex = "0.4"
-hmac = "0.12"
-sha2 = "0.10"
+mpp = { git = "https://github.com/tempoxyz/mpp-rs", features = ["server"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
