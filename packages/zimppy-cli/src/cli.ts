@@ -448,18 +448,20 @@ function createMppxClient(cfg: ZimppyConfig) {
   const client = Mppx.create({
     methods: [
       zcashClient({
-        createPayment: async ({ challenge }) => {
+        createPayment: async ({ challenge, challengeId }) => {
+          const memo = (challenge.methodDetails?.memo ?? '').replace('{id}', challengeId)
           console.error('')
           console.error(`  --- Charge ---`)
           console.error(`  Amount:    ${challenge.amount} zat`)
           console.error(`  Recipient: ${challenge.recipient.slice(0, 40)}...`)
+          console.error(`  Memo:      ${memo.slice(0, 40)}...`)
           console.error(`  ---`)
           console.error('')
 
           const txid = await sendViaWallet(cfg, {
             to: challenge.recipient,
             amountZat: challenge.amount,
-            memo: challenge.methodDetails?.memo ?? '',
+            memo,
           })
 
           return { txid }

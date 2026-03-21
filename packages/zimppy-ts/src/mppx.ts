@@ -84,6 +84,7 @@ export interface ZcashClientPayment {
 export interface ZcashClientOptions {
   createPayment?: (parameters: {
     challenge: z.output<typeof zcashRequestSchema>
+    challengeId: string
   }) => Promise<ZcashClientPayment>
   source?: string
 }
@@ -97,7 +98,7 @@ export function zcashClient(options: ZcashClientOptions = {}) {
         )
       }
 
-      const payment = await options.createPayment({ challenge: challenge.request })
+      const payment = await options.createPayment({ challenge: challenge.request, challengeId: challenge.id })
 
       return Credential.serialize(
         Credential.from({

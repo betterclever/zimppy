@@ -378,14 +378,16 @@ async fn stream_fortune(
 // ── Items 1+2: HMAC challenge IDs + RFC 9457 problem details ────────────
 
 async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
+    // Keys MUST be alphabetical — mppx re-serializes with JSON.stringify after
+    // Zod parsing, which sorts keys. The HMAC depends on exact byte equality.
     let request_payload = serde_json::json!({
         "amount": state.amount_zat.to_string(),
         "currency": "zec",
-        "recipient": state.config.address,
         "methodDetails": {
-            "network": state.config.network,
             "memo": "zimppy:{id}",
+            "network": state.config.network,
         },
+        "recipient": state.config.address,
     });
 
     let encoded_request = base64url_encode(&serde_json::to_vec(&request_payload).unwrap_or_default());
@@ -440,15 +442,17 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
 async fn issue_session_challenge(state: Arc<AppState>) -> axum::response::Response {
     let deposit_amount = state.amount_zat * 10;
 
+    // Keys MUST be alphabetical — mppx re-serializes with JSON.stringify after
+    // Zod parsing, which sorts keys. The HMAC depends on exact byte equality.
     let request_payload = serde_json::json!({
         "amount": state.amount_zat.to_string(),
-        "depositAmount": deposit_amount.to_string(),
         "currency": "zec",
-        "recipient": state.config.address,
+        "depositAmount": deposit_amount.to_string(),
         "methodDetails": {
-            "network": state.config.network,
             "memo": "zimppy:{id}",
+            "network": state.config.network,
         },
+        "recipient": state.config.address,
     });
 
     let encoded_request = base64url_encode(&serde_json::to_vec(&request_payload).unwrap_or_default());
