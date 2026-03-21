@@ -1,8 +1,24 @@
 # zimppy
 
+[![npm](https://img.shields.io/npm/v/zimppy)](https://www.npmjs.com/package/zimppy)
+[![crates.io](https://img.shields.io/crates/v/zimppy-core)](https://crates.io/crates/zimppy-core)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Private machine payments on Zcash.** A complete implementation of the [Machine Payments Protocol (MPP)](https://paymentauth.org) using Zcash shielded transactions.
 
 AI agents pay for APIs — but every payment is public. zimppy adds Zcash as a payment rail to MPP, so sender, receiver, amount, and memo are all encrypted on-chain.
+
+### Install
+
+```bash
+npm install zimppy        # CLI + wallet
+npm install zimppy-ts     # TypeScript SDK
+```
+
+```toml
+# Cargo.toml (Rust verification engine)
+zimppy-core = "0.1"
+```
 
 ## Why?
 
@@ -58,20 +74,18 @@ Agent  →  close → refund of unused balance
 ## Quick Start
 
 ```bash
-# Build
-cargo build --workspace
-npm install
+# Install
+npm install zimppy
 
-# Start the MPP server
-PRICE_ZAT=10000 cargo run --bin zimppy-rust-server
+# Set up wallet
+npx zimppy wallet init "your 24 word seed phrase"
+
+# Start an example server (requires cloning the repo)
+cargo run --bin zimppy-rust-server
 # → listening on http://0.0.0.0:3180
 
-# Try it
-curl http://localhost:3180/api/fortune
-# → 402 Payment Required
-
-curl http://localhost:3180/.well-known/payment
-# → service discovery
+# Make a paid request
+npx zimppy request http://localhost:3180/api/fortune
 ```
 
 ## CLI
