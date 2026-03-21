@@ -530,12 +530,25 @@ async function handleRequest(args: string[]): Promise<void> {
 
   const result = await resp.text()
 
-  // Persist session state if a new session was opened
+  // Extract session ID from response body if a session was opened
   const activeSession = sessionClient.getSession()
-  if (activeSession && activeSession.sessionId) {
+  if (activeSession && !activeSession.sessionId) {
+    // Session was just opened — extract sessionId from server response
+    try {
+      const body = JSON.parse(result)
+      if (body.sessionId) {
+        sessionClient.setSessionId(body.sessionId)
+        console.error(`  Session opened: ${body.sessionId}`)
+      }
+    } catch { /* not JSON or no sessionId */ }
+  }
+
+  // Persist session state
+  const session = sessionClient.getSession()
+  if (session && session.sessionId) {
     saveSession({
-      sessionId: activeSession.sessionId,
-      bearer: activeSession.bearer,
+      sessionId: session.sessionId,
+      bearer: session.bearer,
       url: baseUrl,
       endpoint: new URL(url).pathname,
     })
