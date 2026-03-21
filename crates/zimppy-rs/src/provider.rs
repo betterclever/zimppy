@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::time::Duration;
 
 use mpp::protocol::core::{PaymentChallenge, PaymentCredential, PaymentPayload};
@@ -6,35 +5,27 @@ use mpp::client::PaymentProvider;
 use mpp::error::MppError;
 
 use zimppy_core::rpc::ZebradRpc;
+use zimppy_wallet::{WalletConfig, ZimppyWallet};
 
 /// Zcash payment provider for the mpp-rs client.
 ///
 /// When an agent receives a 402, this provider:
 /// 1. Parses the challenge (recipient, amount, memo)
-/// 2. Sends a real Orchard shielded tx via zcash-devtool
+/// 2. Sends a real Orchard shielded tx via native wallet
 /// 3. Waits for on-chain confirmation
 /// 4. Returns a credential with the txid
 #[derive(Clone)]
 pub struct ZcashPaymentProvider {
-    wallet_dir: String,
-    identity_file: String,
-    lightwalletd_server: String,
+    wallet_config: WalletConfig,
     rpc_endpoint: String,
     /// Max seconds to wait for tx confirmation
     confirmation_timeout: u64,
 }
 
 impl ZcashPaymentProvider {
-    pub fn new(
-        wallet_dir: &str,
-        identity_file: &str,
-        lightwalletd_server: &str,
-        rpc_endpoint: &str,
-    ) -> Self {
+    pub fn new(wallet_config: WalletConfig, rpc_endpoint: &str) -> Self {
         Self {
-            wallet_dir: wallet_dir.to_string(),
-            identity_file: identity_file.to_string(),
-            lightwalletd_server: lightwalletd_server.to_string(),
+            wallet_config,
             rpc_endpoint: rpc_endpoint.to_string(),
             confirmation_timeout: 300,
         }
@@ -45,48 +36,25 @@ impl ZcashPaymentProvider {
         self
     }
 
-    /// Send ZEC via zcash-devtool and return the txid
-    fn send_payment(&self, address: &str, amount_zat: u64, memo: &str) -> Result<String, MppError> {
-        eprintln!("[ZcashProvider] Syncing wallet...");
-        let sync = Command::new("zcash-devtool")
-            .args(["wallet", "-w", &self.wallet_dir, "sync",
-                   "--server", &self.lightwalletd_server,
-                   "--connection", "direct"])
-            .output()
-            .map_err(|e| MppError::InvalidConfig(format!("failed to run zcash-devtool sync: {e}")))?;
+    /// Send ZEC via native wallet and return the txid
+    async fn send_payment(&self, address: &str, amount_zat: u64, memo: &str) -> Result<String, MppError> {
+        eprintln!("[ZcashProvider] Opening wallet and syncing...");
+        let mut wallet = ZimppyWallet::open(WalletConfig {
+            data_dir: self.wallet_config.data_dir.clone(),
+            lwd_endpoint: self.wallet_config.lwd_endpoint.clone(),
+            network: self.wallet_config.network,
+            seed_phrase: self.wallet_config.seed_phrase.clone(),
+            birthday_height: self.wallet_config.birthday_height,
+        }).await.map_err(|e| MppError::InvalidConfig(format!("wallet open failed: {e}")))?;
 
-        if !sync.status.success() {
-            let stderr = String::from_utf8_lossy(&sync.stderr);
-            return Err(MppError::InvalidConfig(format!("wallet sync failed: {stderr}")));
-        }
+        wallet.sync().await
+            .map_err(|e| MppError::InvalidConfig(format!("wallet sync failed: {e}")))?;
 
-        eprintln!("[ZcashProvider] Sending {} zat to {}...", amount_zat, &address[..20]);
+        eprintln!("[ZcashProvider] Sending {} zat to {}...", amount_zat, &address[..20.min(address.len())]);
         eprintln!("[ZcashProvider] Memo: {memo}");
 
-        let send = Command::new("zcash-devtool")
-            .args(["wallet", "-w", &self.wallet_dir, "send",
-                   "-i", &self.identity_file,
-                   "--server", &self.lightwalletd_server,
-                   "--connection", "direct",
-                   "--address", address,
-                   "--value", &amount_zat.to_string(),
-                   "--memo", memo])
-            .output()
-            .map_err(|e| MppError::InvalidConfig(format!("failed to run zcash-devtool send: {e}")))?;
-
-        let stdout = String::from_utf8_lossy(&send.stdout);
-        let stderr = String::from_utf8_lossy(&send.stderr);
-
-        if !send.status.success() {
-            return Err(MppError::InvalidConfig(format!("send failed: {stderr}")));
-        }
-
-        // Extract txid — it's the 64-char hex string in stdout
-        let txid = stdout
-            .lines()
-            .find(|line| line.len() == 64 && line.chars().all(|c| c.is_ascii_hexdigit()))
-            .ok_or_else(|| MppError::InvalidConfig(format!("no txid in output: {stdout}")))?
-            .to_string();
+        let txid = wallet.send(address, amount_zat, Some(memo)).await
+            .map_err(|e| MppError::InvalidConfig(format!("send failed: {e}")))?;
 
         eprintln!("[ZcashProvider] Broadcast txid: {txid}");
         Ok(txid)
@@ -145,12 +113,12 @@ impl PaymentProvider for ZcashPaymentProvider {
             .map_err(|_| MppError::InvalidConfig("invalid amount".to_string()))?;
 
         eprintln!("[ZcashProvider] Received 402 challenge:");
-        eprintln!("[ZcashProvider]   recipient: {}", &recipient[..20]);
+        eprintln!("[ZcashProvider]   recipient: {}", &recipient[..20.min(recipient.len())]);
         eprintln!("[ZcashProvider]   amount: {} zat", amount_zat);
         eprintln!("[ZcashProvider]   memo: {memo}");
 
         // Send real ZEC
-        let txid = self.send_payment(recipient, amount_zat, memo)?;
+        let txid = self.send_payment(recipient, amount_zat, memo).await?;
 
         // Wait for confirmation
         self.wait_for_confirmation(&txid).await?;
@@ -160,9 +128,6 @@ impl PaymentProvider for ZcashPaymentProvider {
         let payload = PaymentPayload::hash(&txid);
         let mut credential = PaymentCredential::new(echo, payload);
 
-        // Also inject our challengeId into the payload for the server
-        // The server needs both txid and challengeId
-        // Override the raw payload to include both
         credential.payload = serde_json::json!({
             "type": "hash",
             "hash": txid,
@@ -177,10 +142,21 @@ impl PaymentProvider for ZcashPaymentProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use zcash_protocol::consensus::NetworkType;
 
     #[test]
     fn supports_zcash_charge() {
-        let provider = ZcashPaymentProvider::new("/tmp/w", "/tmp/i", "server", "rpc");
+        let provider = ZcashPaymentProvider::new(
+            WalletConfig {
+                data_dir: PathBuf::from("/tmp/w"),
+                lwd_endpoint: "https://testnet.zec.rocks".to_string(),
+                network: NetworkType::Test,
+                seed_phrase: None,
+                birthday_height: None,
+            },
+            "https://rpc.example.com",
+        );
         assert!(provider.supports("zcash", "charge"));
         assert!(!provider.supports("tempo", "charge"));
         assert!(!provider.supports("zcash", "session"));

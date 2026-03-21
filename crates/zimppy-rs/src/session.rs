@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -54,13 +53,8 @@ pub enum SessionPayload {
     },
 }
 
-/// Config for server-side refund sending via zcash-devtool.
-#[derive(Clone)]
-pub struct RefundConfig {
-    pub wallet_dir: String,
-    pub identity_file: String,
-    pub lightwalletd_server: String,
-}
+/// Re-export wallet config for refund sending.
+pub use zimppy_wallet::WalletConfig as RefundConfig;
 
 /// Zcash session method — manages prepaid balance sessions.
 #[derive(Clone)]
@@ -295,41 +289,15 @@ impl ZcashSessionMethod {
             if let Some(ref cfg) = self.refund_config {
                 eprintln!("[session:close] Sending refund of {refund_amount} zat...");
 
-                let _sync = Command::new("zcash-devtool")
-                    .args(["wallet", "-w", &cfg.wallet_dir, "sync",
-                           "--server", &cfg.lightwalletd_server,
-                           "--connection", "direct"])
-                    .output();
-
-                let send = Command::new("zcash-devtool")
-                    .args(["wallet", "-w", &cfg.wallet_dir, "send",
-                           "-i", &cfg.identity_file,
-                           "--server", &cfg.lightwalletd_server,
-                           "--connection", "direct",
-                           "--address", &state.refund_address,
-                           "--value", &refund_amount.to_string(),
-                           "--memo", &format!("zimppy-refund:{session_id}")])
-                    .output();
-
-                match send {
-                    Ok(output) => {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        eprintln!("[session:close] send stdout: {stdout}");
-                        eprintln!("[session:close] send stderr: {stderr}");
-                        // zcash-devtool may output txid on stdout or stderr
-                        let all_output = format!("{stdout}\n{stderr}");
-                        let txid = all_output.lines()
-                            .find(|l| l.trim().len() == 64 && l.trim().chars().all(|c| c.is_ascii_hexdigit()))
-                            .map(|l| l.trim())
-                            .unwrap_or("unknown");
-                        eprintln!("[session:close] Refund sent: {txid}");
-                        actual_refund_txid = Some(txid.to_string());
+                let refund_cfg = cfg.clone();
+                let refund_addr = state.refund_address.clone();
+                let sid = session_id.to_string();
+                tokio::spawn(async move {
+                    match send_refund(&refund_cfg, &refund_addr, refund_amount, &sid).await {
+                        Ok(txid) => eprintln!("[session:close] Refund sent: {txid}"),
+                        Err(e) => eprintln!("[session:close] Refund send failed: {e}"),
                     }
-                    Err(e) => {
-                        eprintln!("[session:close] Refund send failed: {e}");
-                    }
-                }
+                });
             } else {
                 eprintln!("[session:close] No refund config — skipping refund of {refund_amount} zat");
             }
@@ -414,6 +382,25 @@ fn sha256_hex(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+/// Send a refund via the native wallet.
+async fn send_refund(
+    cfg: &zimppy_wallet::WalletConfig,
+    to: &str,
+    amount_zat: u64,
+    session_id: &str,
+) -> Result<String, zimppy_wallet::WalletError> {
+    let mut wallet = zimppy_wallet::ZimppyWallet::open(zimppy_wallet::WalletConfig {
+        data_dir: cfg.data_dir.clone(),
+        lwd_endpoint: cfg.lwd_endpoint.clone(),
+        network: cfg.network,
+        seed_phrase: cfg.seed_phrase.clone(),
+        birthday_height: cfg.birthday_height,
+    }).await?;
+    wallet.sync().await?;
+    let memo = format!("zimppy-refund:{session_id}");
+    wallet.send(to, amount_zat, Some(&memo)).await
 }
 
 #[cfg(test)]

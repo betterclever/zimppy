@@ -7,6 +7,7 @@ use zcash_protocol::consensus::NetworkType;
 use crate::error::WalletError;
 
 /// Configuration for opening or creating a wallet.
+#[derive(Clone)]
 pub struct WalletConfig {
     /// Directory for wallet data (SQLite db, logs)
     pub data_dir: PathBuf,

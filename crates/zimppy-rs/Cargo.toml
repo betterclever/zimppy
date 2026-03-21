@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 zimppy-core = { path = "../zimppy-core", features = ["shielded"] }
+zimppy-wallet = { path = "../zimppy-wallet" }
 futures-lite = "2"
 hex = "0.4"
 mpp = { git = "https://github.com/tempoxyz/mpp-rs", features = ["server", "client"] }

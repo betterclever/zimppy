@@ -83,18 +83,19 @@ async fn main() {
 
     let payment = ZcashChargeMethod::new(&rpc_endpoint, &config.address, &config.orchard_ivk);
 
-    let wallet_dir = std::env::var("ZCASH_WALLET_DIR")
-        .unwrap_or_else(|_| "/tmp/zcash-wallet-server".to_string());
-    let identity_file = std::env::var("ZCASH_IDENTITY_FILE")
-        .unwrap_or_else(|_| format!("{wallet_dir}/identity.txt"));
-    let lwd_server = std::env::var("ZCASH_LWD_SERVER")
-        .unwrap_or_else(|_| "testnet.zec.rocks:443".to_string());
+    let wallet_dir = std::env::var("ZIMPPY_WALLET_DIR")
+        .unwrap_or_else(|_| "/tmp/zimppy-server-wallet".to_string());
+    let lwd_endpoint = std::env::var("ZIMPPY_LWD_ENDPOINT")
+        .unwrap_or_else(|_| "https://testnet.zec.rocks".to_string());
+    let seed_phrase = std::env::var("ZIMPPY_SEED_PHRASE").ok();
 
     let session = ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
         .with_refund_config(RefundConfig {
-            wallet_dir: wallet_dir.clone(),
-            identity_file,
-            lightwalletd_server: lwd_server,
+            data_dir: std::path::PathBuf::from(&wallet_dir),
+            lwd_endpoint,
+            network: zcash_protocol::consensus::NetworkType::Test,
+            seed_phrase,
+            birthday_height: None,
         });
 
     let state = Arc::new(AppState {
