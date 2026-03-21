@@ -6,6 +6,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 version = "0.1.0"
+repository = "https://github.com/betterclever/zimppy"
 
 [workspace.lints.clippy]
 dbg_macro = "deny"

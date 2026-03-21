@@ -1,8 +1,10 @@
 [package]
 name = "zimppy-core"
+description = "Zcash Orchard payment verification engine for the Machine Payments Protocol"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "zimppy-core-server"

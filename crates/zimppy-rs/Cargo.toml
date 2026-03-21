@@ -1,8 +1,10 @@
 [package]
 name = "zimppy-rs"
+description = "Rust SDK for Zimppy — charge, session, and streaming payment methods on Zcash"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+repository.workspace = true
 
 [dependencies]
 zimppy-core = { path = "../zimppy-core", features = ["shielded"] }

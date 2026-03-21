@@ -3,6 +3,7 @@ name = "zimppy-wallet"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+repository.workspace = true
 description = "Native Zcash wallet for Zimppy, powered by zingolib"
 
 [dependencies]

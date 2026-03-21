@@ -1,9 +1,8 @@
 {
   "name": "zimppy",
   "version": "0.1.0",
-  "private": true,
   "license": "MIT",
-  "description": "Private machine payments on Zcash — curl-compatible CLI with automatic payment handling",
+  "description": "Private machine payments on Zcash — CLI with automatic shielded payment handling",
   "type": "module",
   "bin": {
     "zimppy": "./src/cli.ts"
@@ -12,6 +11,11 @@
     "start": "tsx src/cli.ts"
   },
   "dependencies": {
+    "@zimppy/core-napi": "0.1.0",
     "tsx": "^4.21.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/betterclever/zimppy.git"
   }
 }

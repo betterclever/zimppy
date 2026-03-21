@@ -1,8 +1,10 @@
 [package]
 name = "zimppy-napi"
+description = "NAPI-RS bindings for Zimppy Zcash verification and wallet"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+repository.workspace = true
 
 [lib]
 crate-type = ["cdylib"]

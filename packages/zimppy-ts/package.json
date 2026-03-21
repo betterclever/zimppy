@@ -1,8 +1,8 @@
 {
   "name": "zimppy-ts",
   "version": "0.1.0",
-  "private": true,
   "license": "MIT",
+  "description": "TypeScript SDK for Zimppy — private machine payments on Zcash",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
@@ -11,5 +11,9 @@
   "dependencies": {
     "mppx": "^0.4.8",
     "zod": "^4.3.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/betterclever/zimppy.git"
   }
 }
