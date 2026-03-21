@@ -13,7 +13,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "tsx --test packages/zimppy-ts/test/**/*.test.ts"
+    "test": "tsx --test packages/zimppy-ts/test/**/*.test.ts",
+    "cli": "tsx packages/zimppy-cli/src/cli.ts"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.1",
