@@ -147,6 +147,18 @@ impl ZimppyWallet {
         Ok(txids.head.to_string())
     }
 
+    /// Save wallet state to disk.
+    pub async fn save(&self) -> Result<(), WalletError> {
+        let wallet_path = self.client.config().get_wallet_path();
+        let bytes = self.client.wallet.write().await.save()
+            .map_err(|e| WalletError::Io(e))?;
+        if let Some(data) = bytes {
+            std::fs::write(&wallet_path, &data)
+                .map_err(|e| WalletError::Io(e))?;
+        }
+        Ok(())
+    }
+
     /// Get the network name ("testnet" or "mainnet").
     pub fn network(&self) -> &str {
         // Access via the config's chain type

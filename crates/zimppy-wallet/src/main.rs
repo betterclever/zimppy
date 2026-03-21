@@ -37,6 +37,7 @@ async fn main() -> Result<(), WalletError> {
                 birthday_height: birthday,
             }).await?;
 
+            wallet.save().await?;
             eprintln!("Wallet created at {}", data_dir.display());
             let addr = wallet.address().await?;
             println!("Address: {addr}");
@@ -46,6 +47,7 @@ async fn main() -> Result<(), WalletError> {
             let mut wallet = open_existing(&data_dir, &lwd, network).await?;
             eprintln!("Syncing...");
             let status = wallet.sync().await?;
+            wallet.save().await?;
             eprintln!("Synced: {}", status.is_synced);
 
             let bal = wallet.balance().await?;
