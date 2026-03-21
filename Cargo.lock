@@ -8325,7 +8325,10 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "tokio",
+ "zcash_protocol",
  "zimppy-core",
+ "zimppy-wallet",
 ]
 
 [[package]]

@@ -30,3 +30,24 @@ export declare class ZimppyCore {
   ): Promise<NapiShieldedVerifyResult>
   health(): Promise<string>
 }
+
+export interface NapiWalletBalance {
+  spendableZat: string
+  pendingZat: string
+  totalZat: string
+}
+
+export declare class ZimppyWalletNapi {
+  static open(
+    dataDir: string,
+    lwdEndpoint: string,
+    network: string,
+    seedPhrase?: string | null,
+    birthdayHeight?: number | null,
+  ): Promise<ZimppyWalletNapi>
+  sync(): Promise<boolean>
+  address(): Promise<string>
+  balance(): Promise<NapiWalletBalance>
+  send(to: string, amountZat: string, memo?: string | null): Promise<string>
+  network(): string
+}

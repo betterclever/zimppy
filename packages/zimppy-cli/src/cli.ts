@@ -16,10 +16,11 @@
  *   zimppy --version             Show version
  */
 
-import { execFileSync, execSync } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type { ZimppyWalletNapi } from '@zimppy/core-napi'
 
 const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
@@ -29,25 +30,11 @@ const DEFAULT_LWD = 'https://testnet.zec.rocks'
 const DEFAULT_RPC = 'https://zcash-testnet-zebrad.gateway.tatum.io'
 const DEFAULT_DEPOSIT = '100000' // 100,000 zat default session deposit
 
-// ── Wallet binary ──────────────────────────────────────────────────
+// ── Wallet NAPI ──────────────────────────────────────────────────
 
-function walletBin(): string {
-  // Check for compiled binary in the workspace
-  for (const candidate of [
-    join(__dirname, '..', '..', '..', 'target', 'debug', 'zimppy-wallet'),
-    join(__dirname, '..', '..', '..', 'target', 'release', 'zimppy-wallet'),
-  ]) {
-    if (existsSync(candidate)) return candidate
-  }
-  // Fall back to PATH
-  return 'zimppy-wallet'
-}
-
-function walletExec(args: string[], dataDir: string): string {
-  return execFileSync(walletBin(), args, {
-    stdio: 'pipe',
-    env: { ...process.env, ZIMPPY_WALLET_DIR: dataDir, ZIMPPY_LWD_ENDPOINT: process.env.ZIMPPY_LWD_ENDPOINT ?? DEFAULT_LWD },
-  }).toString().trim()
+async function openWallet(cfg: ZimppyConfig, seedPhrase?: string): Promise<ZimppyWalletNapi> {
+  const { ZimppyWalletNapi: Wallet } = require('@zimppy/core-napi') as typeof import('@zimppy/core-napi')
+  return Wallet.open(cfg.dataDir, cfg.lwdServer, cfg.network, seedPhrase ?? null, null)
 }
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -150,24 +137,24 @@ async function walletInit(args: string[]): Promise<void> {
     process.exit(1)
   }
 
-  const birthday = args[1] ?? '3906900'
   const dataDir = process.env.ZIMPPY_WALLET_DIR ?? join(CONFIG_DIR, 'wallet')
-
-  console.error('Creating wallet from seed phrase...')
-  try {
-    const out = walletExec(['init', phrase, birthday], dataDir)
-    console.error(out)
-  } catch (e) {
-    console.error(`ERROR: ${(e as Error).message}`)
-    process.exit(1)
-  }
-
   const config: ZimppyConfig = {
     dataDir,
     lwdServer: DEFAULT_LWD,
     rpcEndpoint: DEFAULT_RPC,
     network: 'testnet',
   }
+
+  console.error('Creating wallet from seed phrase...')
+  try {
+    const wallet = await openWallet(config, phrase)
+    const addr = await wallet.address()
+    console.error(`Address: ${addr}`)
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+    process.exit(1)
+  }
+
   saveConfig(config)
   console.error('Config saved.')
   await walletWhoami()
@@ -177,15 +164,13 @@ async function walletWhoami(): Promise<void> {
   const cfg = requireConfig()
 
   try {
-    process.stderr.write('Syncing wallet...')
-    walletExec(['sync'], cfg.dataDir)
-    console.error(' done')
-  } catch {
-    console.error(' (skipped)')
-  }
+    const wallet = await openWallet(cfg)
 
-  try {
-    const address = walletExec(['address'], cfg.dataDir)
+    process.stderr.write('Syncing wallet...')
+    await wallet.sync()
+    console.error(' done')
+
+    const address = await wallet.address()
     const shortAddr = address.length > 50 ? `${address.slice(0, 25)}...${address.slice(-15)}` : address
 
     // Cache address in config for refund operations
@@ -193,14 +178,11 @@ async function walletWhoami(): Promise<void> {
       saveConfig({ ...cfg, address })
     }
 
-    const balOutput = walletExec(['balance'], cfg.dataDir)
-    const lines = balOutput.split('\n').map((l: string) => l.trim()).filter(Boolean)
-    const spendable = lines.find((l: string) => l.startsWith('Spendable:'))?.replace('Spendable:', '').trim() ?? '0'
-    const total = lines.find((l: string) => l.startsWith('Total:'))?.replace('Total:', '').trim() ?? spendable
+    const bal = await wallet.balance()
 
     console.log(`--- Zimppy Wallet ---`)
     console.log(`  Address:  ${shortAddr}`)
-    console.log(`  Balance:  ${total}`)
+    console.log(`  Balance:  ${bal.totalZat} zat`)
     console.log(`  Network:  ${cfg.network}`)
     console.log(`  Status:   Ready`)
     console.log(`---`)
@@ -212,20 +194,18 @@ async function walletWhoami(): Promise<void> {
 async function walletBalance(): Promise<void> {
   const cfg = requireConfig()
   try {
+    const wallet = await openWallet(cfg)
+
     process.stderr.write('Syncing...')
-    walletExec(['sync'], cfg.dataDir)
+    await wallet.sync()
     process.stderr.write(' done\n')
 
-    const balOutput = walletExec(['balance'], cfg.dataDir)
-    const lines = balOutput.split('\n').map((l: string) => l.trim()).filter(Boolean)
-    const spendable = lines.find((l: string) => l.startsWith('Spendable:'))?.replace('Spendable:', '').trim() ?? '0'
-    const pending = lines.find((l: string) => l.startsWith('Pending:'))?.replace('Pending:', '').trim() ?? '0'
-    const total = lines.find((l: string) => l.startsWith('Total:'))?.replace('Total:', '').trim() ?? '0'
+    const bal = await wallet.balance()
 
     console.log(`--- Wallet Balance ---`)
-    console.log(`  Spendable: ${spendable}`)
-    console.log(`  Pending:   ${pending}`)
-    console.log(`  Total:     ${total}`)
+    console.log(`  Spendable: ${bal.spendableZat} zat`)
+    console.log(`  Pending:   ${bal.pendingZat} zat`)
+    console.log(`  Total:     ${bal.totalZat} zat`)
     console.log(`  Network:   ${cfg.network}`)
     console.log(`---`)
   } catch (e) {
@@ -432,30 +412,17 @@ async function handleRequest(args: string[]): Promise<void> {
   console.error('')
   console.error('  🔒 Sending shielded Zcash payment...')
 
-  // Sync wallet
-  process.stderr.write('  ⏳ Syncing wallet...')
-  try {
-    walletExec(['sync'], cfg.dataDir)
-    console.error(' done')
-  } catch {
-    console.error(' (skipped)')
-  }
-
-  // Send payment
-  process.stderr.write('  📡 Broadcasting transaction...')
+  // Sync + send via native wallet
   let txid: string
   try {
-    const out = walletExec(['send', challenge.recipient, sendAmount, challenge.memo], cfg.dataDir)
-    // zimppy-wallet outputs "Sent: <txid>"
-    txid = out.split('\n').find(l => l.startsWith('Sent: '))?.replace('Sent: ', '').trim()
-      ?? out.split('\n').find(l => l.length === 64 && /^[a-f0-9]+$/.test(l))
-      ?? ''
-    if (!txid) {
-      console.error(' FAILED')
-      console.error('ERROR: No txid in send output')
-      console.error(out)
-      process.exit(1)
-    }
+    const wallet = await openWallet(cfg)
+
+    process.stderr.write('  ⏳ Syncing wallet...')
+    await wallet.sync()
+    console.error(' done')
+
+    process.stderr.write('  📡 Broadcasting transaction...')
+    txid = await wallet.send(challenge.recipient, sendAmount, challenge.memo)
   } catch (e) {
     console.error(' FAILED')
     console.error(`ERROR: Send failed: ${(e as Error).message}`)
