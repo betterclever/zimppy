@@ -7,6 +7,10 @@ use zimppy_core::replay::ConsumedTxids;
 use zimppy_core::rpc::ZebradRpc;
 use zimppy_core::shielded::{self, ShieldedVerifyRequest};
 
+use mpp::protocol::core::{PaymentCredential, Receipt};
+use mpp::protocol::intents::SessionRequest;
+use mpp::protocol::traits::{SessionMethod, VerificationError};
+
 /// Session state stored per active session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
@@ -69,6 +73,8 @@ pub struct ZcashSessionMethod {
     sessions: Arc<Mutex<HashMap<String, SessionState>>>,
     refund_config: Option<RefundConfig>,
     sessions_dir: Option<PathBuf>,
+    /// Cache of recent verify results for the `respond()` trait hook.
+    last_verify_results: Arc<Mutex<HashMap<String, SessionVerifyResult>>>,
 }
 
 impl ZcashSessionMethod {
@@ -81,6 +87,7 @@ impl ZcashSessionMethod {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             refund_config: None,
             sessions_dir: None,
+            last_verify_results: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -128,12 +135,8 @@ impl ZcashSessionMethod {
         }
     }
 
-    pub fn method(&self) -> &str {
-        "zcash"
-    }
-
     /// Verify a session credential and dispatch by action.
-    pub async fn verify_session(
+    pub async fn verify_session_payload(
         &self,
         payload_json: &serde_json::Value,
         charge_amount_zat: u64,
@@ -409,6 +412,83 @@ impl ZcashSessionMethod {
         drop(sessions);
         self.persist_session(session_id, &state_snapshot);
         Ok(remaining)
+    }
+}
+
+// ── mpp-rs SessionMethod trait implementation ────────────────────────────
+
+impl SessionMethod for ZcashSessionMethod {
+    fn method(&self) -> &str {
+        "zcash"
+    }
+
+    fn verify_session(
+        &self,
+        credential: &PaymentCredential,
+        request: &SessionRequest,
+    ) -> impl std::future::Future<Output = Result<Receipt, VerificationError>> + Send {
+        let credential = credential.clone();
+        let charge_amount: u64 = request.amount.parse().unwrap_or(0);
+        let this = self.clone();
+
+        async move {
+            // credential.payload is already a serde_json::Value
+            let payload_json = credential.payload;
+
+            // Delegate to existing verify logic
+            let result = this.verify_session_payload(&payload_json, charge_amount).await
+                .map_err(|e| VerificationError::new(e.to_string()))?;
+
+            // Cache the result for the respond() hook
+            if let Ok(mut cache) = this.last_verify_results.lock() {
+                cache.insert(result.session_id.clone(), result.clone());
+            }
+
+            Ok(Receipt::success("zcash", &result.session_id))
+        }
+    }
+
+    fn challenge_method_details(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "network": self.network,
+        }))
+    }
+
+    fn respond(&self, credential: &PaymentCredential, receipt: &Receipt) -> Option<serde_json::Value> {
+        // credential.payload is already a serde_json::Value
+        let action = credential.payload.get("action").and_then(|a| a.as_str()).unwrap_or("");
+
+        match action {
+            "open" | "topUp" | "close" => {
+                // Look up cached verify result for management response details
+                let session_id = &receipt.reference;
+                let cached = self.last_verify_results.lock().ok()
+                    .and_then(|cache| cache.get(session_id).cloned());
+
+                let mut response = serde_json::json!({
+                    "status": "ok",
+                    "action": action,
+                    "sessionId": session_id,
+                });
+
+                if let Some(result) = cached {
+                    if let Some(ref txid) = result.refund_txid {
+                        response["refundTxid"] = serde_json::json!(txid);
+                    }
+                    if let Some(amount) = result.refund_amount_zat {
+                        response["refundAmountZat"] = serde_json::json!(amount);
+                    }
+                }
+
+                // Clean up cached result
+                if let Ok(mut cache) = self.last_verify_results.lock() {
+                    cache.remove(session_id);
+                }
+
+                Some(response)
+            }
+            _ => None, // bearer — let the content handler run
+        }
     }
 }
 

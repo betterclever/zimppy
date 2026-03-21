@@ -364,7 +364,7 @@ async fn handle_session_payment(
     let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
     eprintln!("[SESSION] Action: {action}");
 
-    match state.session.verify_session(&payload, state.amount_zat).await {
+    match state.session.verify_session_payload(&payload, state.amount_zat).await {
         Ok(result) => {
             eprintln!("[SESSION] session_id={}, action={}, management={}",
                 result.session_id, result.action, result.is_management);
