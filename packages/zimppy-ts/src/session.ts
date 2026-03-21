@@ -112,7 +112,7 @@ export interface ZcashSessionServerOptions {
   sendRefund?: (params: { to: string; amountZat: number; memo: string }) => Promise<string>
 }
 
-export function zcashSessionServer(options: ZcashSessionServerOptions) {
+export function zcashSession(options: ZcashSessionServerOptions) {
   const { orchardIvk, crypto, store, recipient, network } = options
 
   return Method.toServer(zcashSessionMethod, {
@@ -337,6 +337,9 @@ export function zcashSessionServer(options: ZcashSessionServerOptions) {
   }
 }
 
+/** @deprecated Use `zcashSession` instead */
+export const zcashSessionServer = zcashSession
+
 // ── Client session ──────────────────────────────────────────────────
 
 export interface ZcashSessionClientOptions {
@@ -443,6 +446,11 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
 
     /** Get remaining balance (requires server cooperation — client doesn't track) */
     isActive() { return activeSession !== null },
+
+    /** Restore session state from persisted storage */
+    restore(sessionId: string, bearer: string) {
+      activeSession = { sessionId, bearer }
+    },
 
     /** Reset session state */
     cleanup() {

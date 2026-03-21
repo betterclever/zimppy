@@ -44,7 +44,7 @@ export interface ZcashServerOptions {
   }) => Promise<ZcashVerifyResult>
 }
 
-export function zcashServer(options: ZcashServerOptions) {
+export function zcash(options: ZcashServerOptions) {
   const crypto = options.verifyPayment ? null : new NapiCryptoClient(options.rpcEndpoint)
 
   return Method.toServer(zcashMethod, {
@@ -139,5 +139,8 @@ async function verifyViaNapi(parameters: {
     txid: result.txid,
   }
 }
+
+/** @deprecated Use `zcash` instead */
+export const zcashServer = zcash
 
 export { zcashMethod as method }

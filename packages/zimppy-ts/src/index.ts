@@ -10,6 +10,7 @@ export {
   zcashCredentialPayloadSchema,
   zcashMethod,
   zcashRequestSchema,
+  zcash,
   zcashServer,
   zcashClient,
 } from './mppx.js'
@@ -21,6 +22,7 @@ export type {
 } from './mppx.js'
 export {
   zcashSessionMethod,
+  zcashSession,
   zcashSessionServer,
   zcashSessionClient,
   sessionRequestSchema,

@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { Credential } from 'mppx'
 import { Mppx, NodeListener, Request as MppRequest } from 'mppx/server'
-import { zcashMethod, zcashRequestSchema, zcashServer } from 'zimppy-ts'
+import { zcashMethod, zcashRequestSchema, zcash } from 'zimppy-ts'
 
 const configPath = process.env.SERVER_WALLET_CONFIG ?? 'config/server-wallet.json'
 const walletConfig = JSON.parse(readFileSync(configPath, 'utf-8')) as {
@@ -19,7 +19,7 @@ const PRICE_ZAT = String(process.env.PRICE_ZAT ?? '42000')
 
 const payment = Mppx.create({
   methods: [
-    zcashServer({
+    zcash({
       orchardIvk: walletConfig.orchardIvk,
       rpcEndpoint: RPC_ENDPOINT,
     }),

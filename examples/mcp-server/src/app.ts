@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { Mcp } from 'mppx'
 import { Mppx, Transport } from 'mppx/server'
-import { zcashMethod, zcashRequestSchema, zcashServer } from 'zimppy-ts'
+import { zcashMethod, zcashRequestSchema, zcash } from 'zimppy-ts'
 
 export type WalletConfig = {
   network: 'testnet' | 'mainnet'
@@ -30,7 +30,7 @@ export function createMcpApp(parameters: {
 
   const payment = Mppx.create({
     methods: [
-      zcashServer({
+      zcash({
         orchardIvk: walletConfig.orchardIvk,
         rpcEndpoint,
       }),
