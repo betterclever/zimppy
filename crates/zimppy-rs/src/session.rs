@@ -283,7 +283,7 @@ impl ZcashSessionMethod {
         let refund_amount = state.deposit_amount_zat.saturating_sub(state.spent_zat);
         eprintln!("[session:close] {session_id}: refund={refund_amount} to {}", &state.refund_address[..20.min(state.refund_address.len())]);
 
-        let mut actual_refund_txid: Option<String> = None;
+        let actual_refund_txid: Option<String> = None;
 
         if refund_amount > 0 {
             if let Some(ref cfg) = self.refund_config {

@@ -16,7 +16,7 @@ Run these commands in order. Do not skip steps.
 
 **Step 1 — Check wallet:** `npx zimppy wallet whoami`
 
-**Step 2 — If not configured:** `ZCASH_WALLET_DIR=/tmp/zcash-wallet-send npx zimppy wallet login`
+**Step 2 — If not configured:** `npx zimppy wallet init "your 24 word seed phrase"` or `npx zimppy wallet login` to see setup instructions
 
 **Step 3 — Confirm readiness:** `npx zimppy wallet whoami` — should show address, balance, and `ready: true`
 
@@ -98,8 +98,9 @@ npx zimppy request --deposit 500000 http://localhost:3180/api/session/fortune
 
 | Endpoint | Method | Price | Description |
 |---|---|---|---|
-| `/api/summarize` | POST | 50,000 zat | Summarize a document (one-time charge) |
-| `/api/session/summarize` | POST | 50,000 zat/req | Summarize via prepaid session |
+| `/api/summarize` | POST | 10,000 zat | Summarize a document (one-time charge) |
+| `/api/session/summarize` | POST | 10,000 zat/req | Summarize via prepaid session |
+| `/api/stream/summarize` | POST | 1,000 zat/token | Streaming summary, pay per token |
 | `/api/health` | GET | Free | Health check |
 | `/.well-known/payment` | GET | Free | Service discovery |
 
@@ -144,8 +145,8 @@ npx zimppy session close
 
 | Issue | Cause | Fix |
 |---|---|---|
-| `No wallet configured` | Wallet not set up | Run `ZCASH_WALLET_DIR=/tmp/zcash-wallet-send npx zimppy wallet login` |
-| `zcash-devtool not found` | Tool not installed | Run `cargo install --git https://github.com/zcash/zcash-devtool` |
+| `No wallet configured` | Wallet not set up | Run `npx zimppy wallet init "seed phrase"` |
+| `zimppy-wallet not found` | Wallet binary not built | Run `cargo build -p zimppy-wallet` |
 | `Sync failed` | Lightwalletd unavailable | Check network, retry in a moment |
 | `Send failed` | Insufficient balance or wallet issue | Check `npx zimppy wallet balance`, fund if needed |
 | `402 but no challenge` | Server doesn't support MPP | Only use with MPP-enabled services |

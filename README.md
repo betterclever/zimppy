@@ -79,8 +79,8 @@ curl http://localhost:3180/.well-known/payment
 The `zimppy` CLI handles payments automatically — discover services, send shielded payments, manage sessions.
 
 ```bash
-# Setup wallet
-npx zimppy wallet login
+# Create wallet from BIP39 seed phrase
+npx zimppy wallet init "your 24 word seed phrase here"
 npx zimppy wallet whoami
 
 # One-time paid request
@@ -90,9 +90,6 @@ npx zimppy request http://localhost:3180/api/fortune
 npx zimppy request http://localhost:3180/api/session/fortune
 npx zimppy request http://localhost:3180/api/session/fortune  # instant!
 npx zimppy session close  # refund unused balance
-
-# Custom deposit amount
-npx zimppy request --deposit 500000 http://localhost:3180/api/session/fortune
 ```
 
 ## Demos
