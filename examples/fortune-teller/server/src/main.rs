@@ -44,7 +44,7 @@ fn generate_challenge_id(secret: &str, fields: &[&str]) -> String {
         .expect("HMAC can take key of any size");
     mac.update(payload.as_bytes());
     let result = mac.finalize();
-    hex::encode(result.into_bytes())
+    base64url_encode(&result.into_bytes())
 }
 
 #[tokio::main]
@@ -137,7 +137,7 @@ async fn main() {
 async fn discovery(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(serde_json::json!({
         "methods": ["zcash"],
-        "intents": ["charge"],
+        "intents": ["charge", "session"],
         "network": state.config.network,
         "recipient": state.config.address,
         "defaultAmount": state.amount_zat.to_string(),
@@ -177,8 +177,8 @@ async fn session_fortune(
             }
         }
     }
-    // No credential — issue session challenge (same as charge but intent=session)
-    issue_challenge(state).await
+    // No credential — issue session challenge (intent=session)
+    issue_session_challenge(state).await
 }
 
 async fn handle_session_payment(state: Arc<AppState>, auth_str: &str) -> axum::response::Response {
@@ -258,7 +258,7 @@ async fn stream_fortune(
     // Must have a session credential (bearer action)
     let auth = match headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
         Some(a) if a.starts_with("Payment ") => a,
-        _ => return issue_challenge(state).await,
+        _ => return issue_session_challenge(state).await,
     };
 
     let encoded = auth.trim_start_matches("Payment ").trim();
@@ -430,12 +430,73 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
         .into_response()
 }
 
+async fn issue_session_challenge(state: Arc<AppState>) -> axum::response::Response {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let amount_str = state.amount_zat.to_string();
+    let now_str = now.to_string();
+    let challenge_id = generate_challenge_id(
+        &state.secret_key,
+        &["zimppy", "zcash", "session", &amount_str, "ZEC", &state.config.address, &now_str],
+    );
+
+    let memo_template = format!("zimppy:{challenge_id}");
+
+    eprintln!("[402] Issuing session challenge:");
+    eprintln!("  challenge_id: {challenge_id}");
+    eprintln!("  recipient: {}", state.config.address);
+    eprintln!("  amount: {} zat", state.amount_zat);
+    eprintln!("  memo: {memo_template}");
+
+    if let Ok(mut challenges) = state.challenges.lock() {
+        challenges.insert(challenge_id.clone(), (state.amount_zat, now));
+    }
+
+    let deposit_amount = state.amount_zat * 10;
+
+    let request_payload = serde_json::json!({
+        "challengeId": challenge_id,
+        "amount": state.amount_zat.to_string(),
+        "depositAmount": deposit_amount.to_string(),
+        "currency": "ZEC",
+        "recipient": state.config.address,
+        "network": state.config.network,
+        "memo": memo_template,
+        "expiresAt": now + 600,
+    });
+
+    let encoded_request = base64url_encode(&serde_json::to_vec(&request_payload).unwrap_or_default());
+
+    let www_auth = format!(
+        "Payment id=\"{challenge_id}\", realm=\"zimppy\", method=\"zcash\", intent=\"session\", request=\"{encoded_request}\""
+    );
+
+    (
+        StatusCode::PAYMENT_REQUIRED,
+        [
+            (header::WWW_AUTHENTICATE, www_auth),
+            (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
+        ],
+        Json(serde_json::json!({
+            "type": "https://zimppy.dev/problems/payment-required",
+            "title": "Payment Required",
+            "status": 402,
+            "detail": format!("Open a session by depositing {} zat to {} with memo '{}'", deposit_amount, state.config.address, memo_template),
+            "challengeId": challenge_id,
+        })),
+    )
+        .into_response()
+}
+
 async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response::Response {
     let encoded = auth_str.trim_start_matches("Payment ").trim();
 
     eprintln!("[AUTH] Received credential");
 
-    let (txid, challenge_id) = match decode_credential(encoded) {
+    let (txid, challenge_id, challenge_id_from_echo) = match decode_credential(encoded) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[AUTH] ERROR: invalid credential: {e}");
@@ -445,6 +506,12 @@ async fn handle_payment(state: Arc<AppState>, auth_str: &str) -> axum::response:
 
     eprintln!("[AUTH] txid: {txid}");
     eprintln!("[AUTH] challenge_id: {challenge_id}");
+    eprintln!("[AUTH] challenge_id_from_echo: {challenge_id_from_echo}");
+
+    if challenge_id != challenge_id_from_echo {
+        eprintln!("[AUTH] ERROR: echoed challenge ID mismatch");
+        return problem_response(400, "Invalid Credential", "echoed challenge ID does not match payload challenge ID");
+    }
 
     let amount_zat = match state.challenges.lock() {
         Ok(challenges) => {
@@ -512,7 +579,7 @@ fn problem_response(status: u16, title: &str, detail: &str) -> axum::response::R
         code,
         [(header::CONTENT_TYPE, PROBLEM_JSON.to_string())],
         Json(serde_json::json!({
-            "type": format!("https://zimppy.dev/problems/{}", title.to_lowercase().replace(' ', "-")),
+            "type": format!("https://paymentauth.org/problems/{}", title.to_lowercase().replace(' ', "-")),
             "title": title,
             "status": status,
             "detail": detail,
@@ -521,7 +588,7 @@ fn problem_response(status: u16, title: &str, detail: &str) -> axum::response::R
         .into_response()
 }
 
-fn decode_credential(encoded: &str) -> Result<(String, String), String> {
+fn decode_credential(encoded: &str) -> Result<(String, String, String), String> {
     let bytes = base64url_decode(encoded).map_err(|_| "invalid base64url".to_string())?;
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("invalid JSON: {e}"))?;
@@ -535,7 +602,12 @@ fn decode_credential(encoded: &str) -> Result<(String, String), String> {
         .and_then(|v| v.as_str())
         .ok_or("missing payload.challengeId")?
         .to_string();
-    Ok((txid, challenge_id))
+    let challenge_id_from_echo = value
+        .pointer("/challenge/id")
+        .and_then(|v| v.as_str())
+        .ok_or("missing challenge.id")?
+        .to_string();
+    Ok((txid, challenge_id, challenge_id_from_echo))
 }
 
 fn pick_fortune() -> &'static str {
