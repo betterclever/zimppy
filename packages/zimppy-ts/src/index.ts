@@ -32,5 +32,5 @@ export type {
   ZcashSessionServerOptions,
   ZcashSessionClientOptions,
 } from './session.js'
-export { serveStream } from './sse.js'
-export type { ServeStreamOptions, NeedTopupEvent, NeedVoucherEvent, StreamReceipt } from './sse.js'
+export { serveStream, toResponse, parseEvent, isEventStream, iterateData } from './sse.js'
+export type { ServeStreamOptions, NeedTopupEvent, NeedVoucherEvent, StreamReceipt, SseEvent } from './sse.js'

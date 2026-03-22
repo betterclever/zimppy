@@ -100,15 +100,13 @@ export function zcashClient(options: ZcashClientOptions = {}) {
 
       const payment = await options.createPayment({ challenge: challenge.request, challengeId: challenge.id })
 
-      return Credential.serialize(
-        Credential.from({
-          challenge,
-          payload: {
-            txid: payment.txid,
-          },
-          ...(payment.source ?? options.source ? { source: payment.source ?? options.source } : {}),
-        }),
-      )
+      return Credential.serialize({
+        challenge,
+        payload: {
+          txid: payment.txid,
+        },
+        ...(payment.source ?? options.source ? { source: payment.source ?? options.source } : {}),
+      })
     },
   })
 }

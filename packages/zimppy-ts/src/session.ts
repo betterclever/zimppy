@@ -110,14 +110,38 @@ export interface ZcashSessionServerOptions {
   recipient: string
   /** Network */
   network: 'testnet' | 'mainnet'
+  /** Suggested deposit amount in zatoshis */
+  suggestedDeposit?: number
+  /** Label for the unit being priced (e.g., "token", "request") */
+  unitType?: string
   /** Callback to send refund on close */
   sendRefund?: (params: { to: string; amountZat: number; memo: string }) => Promise<string>
 }
 
 export function zcashSession(options: ZcashSessionServerOptions) {
-  const { orchardIvk, crypto, store, recipient, network } = options
+  const { orchardIvk, crypto, store, recipient, network, suggestedDeposit, unitType } = options
 
   return Method.toServer(zcashSessionMethod, {
+    defaults: {
+      currency: 'zec',
+      recipient,
+      ...(suggestedDeposit !== undefined && { suggestedDeposit: String(suggestedDeposit) }),
+      ...(unitType !== undefined && { unitType }),
+      methodDetails: {
+        network,
+        memo: 'zimppy:{id}',
+      },
+    },
+
+    async request({ credential, request }) {
+      // On credential retry, preserve the original challenge request
+      // so the HMAC still matches.
+      if (credential) {
+        return credential.challenge.request as typeof request
+      }
+      return request
+    },
+
     async verify({ credential, request }) {
       const payload = credential.payload
 
@@ -137,12 +161,11 @@ export function zcashSession(options: ZcashSessionServerOptions) {
 
     respond({ credential }) {
       const payload = credential.payload as z.output<typeof sessionCredentialPayloadSchema>
-      // Management actions (open, topUp, close) return JSON directly
-      // Bearer actions (content requests) return undefined → proceed to route handler
-      if (payload.action === 'bearer') return undefined
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'content-type': 'application/json' },
-      })
+      // close/topUp are pure management — return 204 No Content
+      if (payload.action === 'close') return new Response(null, { status: 204 })
+      if (payload.action === 'topUp') return new Response(null, { status: 204 })
+      // open and bearer fall through to the route handler to serve content
+      return undefined
     },
   })
 
@@ -369,7 +392,7 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
           bearer: activeSession.bearer,
         }
         pendingClose = false
-        const result = Credential.serialize(Credential.from({ challenge, payload }))
+        const result = Credential.serialize({ challenge, payload })
         activeSession = null
         return result
       }
@@ -383,26 +406,26 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
           memo: memo ?? '',
         })
         pendingTopUp = false
-        return Credential.serialize(Credential.from({
+        return Credential.serialize({
           challenge,
           payload: {
             action: 'topUp' as const,
             sessionId: activeSession.sessionId,
             topUpTxid,
           },
-        }))
+        })
       }
 
       // Bearer (hot path — no on-chain tx)
       if (activeSession) {
-        return Credential.serialize(Credential.from({
+        return Credential.serialize({
           challenge,
           payload: {
             action: 'bearer' as const,
             sessionId: activeSession.sessionId,
             bearer: activeSession.bearer,
           },
-        }))
+        })
       }
 
       // Open (first request — send deposit)
@@ -418,7 +441,7 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
       const bearerSecret = randomBytes(32).toString('hex')
       activeSession = { sessionId: '', bearer: bearerSecret }
 
-      return Credential.serialize(Credential.from({
+      return Credential.serialize({
         challenge,
         payload: {
           action: 'open' as const,
@@ -426,7 +449,7 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
           refundAddress: options.refundAddress,
           bearerSecret,
         },
-      }))
+      })
     },
   })
 

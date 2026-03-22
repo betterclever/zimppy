@@ -32,10 +32,10 @@ pub enum SseEvent {
     /// Content chunk delivered to the client.
     Message(String),
     /// Balance exhausted — client must send a topUp.
-    PaymentNeedVoucher {
+    PaymentNeedTopup {
         session_id: String,
-        required_amount: u64,
-        current_balance: u64,
+        balance_required: u64,
+        balance_spent: u64,
     },
     /// Stream complete — final receipt.
     PaymentReceipt {
@@ -52,11 +52,11 @@ impl SseEvent {
     pub fn to_sse_string(&self) -> String {
         match self {
             Self::Message(data) => format!("event: message\ndata: {data}\n\n"),
-            Self::PaymentNeedVoucher { session_id, required_amount, current_balance } => {
+            Self::PaymentNeedTopup { session_id, balance_required, balance_spent } => {
                 let json = serde_json::json!({
                     "sessionId": session_id,
-                    "requiredAmount": required_amount,
-                    "currentBalance": current_balance,
+                    "balanceRequired": balance_required,
+                    "balanceSpent": balance_spent,
                 });
                 format!("event: payment-need-topup\ndata: {json}\n\n")
             }
@@ -80,7 +80,7 @@ impl SseEvent {
 ///
 /// Yields `SseEvent` items. The caller converts these to HTTP SSE responses.
 ///
-/// When balance is exhausted, yields `PaymentNeedVoucher` and polls
+/// When balance is exhausted, yields `PaymentNeedTopup` and polls
 /// until the client tops up or the timeout expires.
 pub async fn serve_stream<S>(
     session: &ZcashSessionMethod,
@@ -107,10 +107,10 @@ where
             Err(_) => {
                 // Balance exhausted
                 let balance = get_balance(session, &options.session_id);
-                events.push(SseEvent::PaymentNeedVoucher {
+                events.push(SseEvent::PaymentNeedTopup {
                     session_id: options.session_id.clone(),
-                    required_amount: options.tick_cost_zat,
-                    current_balance: balance,
+                    balance_required: options.tick_cost_zat,
+                    balance_spent: balance,
                 });
 
                 // Poll for topUp
