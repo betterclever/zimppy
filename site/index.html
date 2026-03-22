@@ -424,7 +424,7 @@
     <li><a href="#cli">CLI</a></li>
     <li><a href="https://mpp.dev" target="_blank">MPP Spec</a></li>
   </ul>
-  <a href="https://github.com/AgitoReiworworking/zimppy" class="nav-gh" target="_blank">
+  <a href="https://github.com/betterclever/zimppy" class="nav-gh" target="_blank">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
     GitHub
   </a>
@@ -504,15 +504,14 @@
 <!-- INTEGRATE -->
 <div class="w">
   <section id="integrate" class="s-border">
-    <div class="s-label">Add to your stack</div>
-    <div class="s-title">Accept private payments in 5 minutes</div>
-    <p class="s-desc">
-      Drop zimppy into your existing API. TypeScript or Rust &mdash;
-      same HTTP 402 flow, same MPP spec, fully shielded underneath.
-    </p>
+    <div class="s-label">Integrate</div>
+    <div class="s-title">TypeScript or Rust. Same MPP spec.</div>
     <div class="int-grid">
       <!-- Server -->
       <div class="int-card">
+        <div class="int-head">
+          <h3>Server</h3>
+        </div>
         <div class="tab-bar">
           <button class="tab-btn active" onclick="switchTab(this, 'srv-ts')">TypeScript</button>
           <button class="tab-btn" onclick="switchTab(this, 'srv-rs')">Rust</button>
@@ -522,45 +521,52 @@
 <span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
-  methods: [<span class="fn">zcash</span>({ orchardIvk: IVK })],
-  secretKey: SECRET,
+  methods: [<span class="fn">zcash</span>({
+    orchardIvk: process.env.ORCHARD_IVK,
+    rpcEndpoint: process.env.ZEBRAD_RPC,
+  })],
+  realm: <span class="str">'my-api'</span>,
+  secretKey: process.env.MPP_SECRET_KEY,
 })
 
-<span class="cm">// Any route handler:</span>
 <span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">charge</span>({
-  amount: <span class="str">'10000'</span>,
+  amount: <span class="str">'42000'</span>,
   currency: <span class="str">'zec'</span>,
   recipient: ADDRESS,
   methodDetails: { network: <span class="str">'mainnet'</span> },
 })(request)
 
 <span class="kw">if</span> (result.status === <span class="num">402</span>) <span class="kw">return</span> result.challenge
-<span class="kw">return</span> result.<span class="fn">withReceipt</span>(
-  Response.<span class="fn">json</span>({ fortune: <span class="str">'...'</span> })
-)</pre></div>
+<span class="kw">return</span> result.<span class="fn">withReceipt</span>(Response.<span class="fn">json</span>({ data }))</pre></div>
         </div>
         <div id="srv-rs" class="tab-panel">
-          <div class="int-code"><pre><span class="kw">use</span> mpp::{Mpp, <span class="fn">compute_challenge_id</span>};
-<span class="kw">use</span> zimppy_rs::{ZcashChargeMethod};
+          <div class="int-code"><pre><span class="kw">use</span> mpp::server::Mpp;
+<span class="kw">use</span> zimppy_rs::ZcashChargeMethod;
 
-<span class="kw">let</span> charge = <span class="fn">ZcashChargeMethod</span>::<span class="fn">new</span>(
-  &rpc, &address, &ivk,
+<span class="kw">let</span> charge = ZcashChargeMethod::<span class="fn">new</span>(
+  &rpc_endpoint, &address, &orchard_ivk,
 );
-<span class="kw">let</span> mpp = Mpp::<span class="fn">new</span>(charge, <span class="str">"my-api"</span>, &key);
+<span class="kw">let</span> mpp = Mpp::<span class="fn">new</span>(charge, <span class="str">"my-api"</span>, &secret_key);
 
-<span class="cm">// In your axum handler:</span>
-<span class="kw">match</span> mpp.<span class="fn">verify_credential</span>(&auth_header) {
+<span class="cm">// axum handler:</span>
+<span class="kw">let</span> auth = headers.<span class="fn">get</span>(<span class="str">"Authorization"</span>);
+<span class="kw">match</span> mpp.<span class="fn">verify_credential</span>(&credential).<span class="kw">await</span> {
   Ok(receipt) => {
-    <span class="cm">// Credential verified, serve content</span>
-    (StatusCode::OK, Json(data))
-      .<span class="fn">into_response</span>()
+    <span class="cm">// Payment verified — serve content</span>
+    <span class="kw">let</span> resp = (StatusCode::OK, Json(data));
+    ([(header::HeaderName::<span class="fn">from_static</span>(
+      <span class="str">"payment-receipt"</span>), receipt.<span class="fn">to_header</span>()
+    )], resp).<span class="fn">into_response</span>()
   }
-  Err(_) => <span class="fn">issue_402</span>(&mpp),
+  Err(_) => <span class="fn">issue_402_challenge</span>(&mpp),
 }</pre></div>
         </div>
       </div>
       <!-- Client -->
       <div class="int-card">
+        <div class="int-head">
+          <h3>Client</h3>
+        </div>
         <div class="tab-bar">
           <button class="tab-btn active" onclick="switchTab(this, 'cli-ts')">TypeScript</button>
           <button class="tab-btn" onclick="switchTab(this, 'cli-rs')">Rust</button>
@@ -572,41 +578,36 @@
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
   methods: [<span class="fn">zcashClient</span>({
     <span class="fn">createPayment</span>: <span class="kw">async</span> ({ challenge, challengeId }) => {
-      <span class="cm">// Send shielded ZEC, return txid</span>
+      <span class="kw">const</span> memo = challenge.methodDetails?.memo
+        ?.<span class="fn">replace</span>(<span class="str">'{id}'</span>, challengeId) ?? challengeId
       <span class="kw">const</span> txid = <span class="kw">await</span> wallet.<span class="fn">send</span>(
-        challenge.recipient,
-        challenge.amount,
-        challengeId, <span class="cm">// memo binding</span>
+        challenge.recipient, challenge.amount, memo,
       )
       <span class="kw">return</span> { txid }
     },
   })],
 })
 
-<span class="cm">// Just fetch — 402 handled automatically</span>
-<span class="kw">const</span> res = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(
-  <span class="str">'https://api.example.com/fortune'</span>
-)
+<span class="cm">// 402 → pay → retry handled automatically</span>
+<span class="kw">const</span> res = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(<span class="str">'https://api.example.com/fortune'</span>)
 console.<span class="fn">log</span>(<span class="kw">await</span> res.<span class="fn">json</span>())</pre></div>
         </div>
         <div id="cli-rs" class="tab-panel">
-          <div class="int-code"><pre><span class="kw">use</span> mpp::client::{MppClient, PaymentProvider};
+          <div class="int-code"><pre><span class="kw">use</span> mpp::client::PaymentProvider;
 <span class="kw">use</span> zimppy_rs::ZcashPaymentProvider;
 
-<span class="kw">let</span> provider = <span class="fn">ZcashPaymentProvider</span>::<span class="fn">new</span>(
+<span class="kw">let</span> provider = ZcashPaymentProvider::<span class="fn">new</span>(
   wallet_config, &rpc_endpoint,
 );
 
-<span class="kw">let</span> client = MppClient::<span class="fn">new</span>()
-  .<span class="fn">with_provider</span>(provider);
+<span class="cm">// Provider implements PaymentProvider trait:</span>
+<span class="cm">//   supports("zcash", "charge") → true</span>
+<span class="cm">//   pay(&challenge) → sends shielded ZEC,</span>
+<span class="cm">//     waits for confirmation,</span>
+<span class="cm">//     returns credential with txid</span>
 
-<span class="cm">// Auto-handles 402 → pay → retry</span>
-<span class="kw">let</span> response = client
-  .<span class="fn">get</span>(<span class="str">"https://api.example.com/fortune"</span>)
-  .<span class="fn">send</span>()
-  .<span class="kw">await</span>?;
-
-<span class="fn">println!</span>(<span class="str">"{}"</span>, response.<span class="fn">text</span>().<span class="kw">await</span>?);</pre></div>
+<span class="cm">// Wire into any HTTP client that</span>
+<span class="cm">// handles the 402 → pay → retry loop</span></pre></div>
         </div>
       </div>
     </div>
@@ -729,13 +730,8 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
 <!-- SESSIONS -->
 <div class="w">
   <section id="sessions" class="s-border">
-    <div class="s-label">Prepaid sessions</div>
-    <div class="s-title">Deposit once, instant requests</div>
-    <p class="s-desc">
-      For streaming or high-frequency APIs. The client deposits ZEC once,
-      then authenticates every request with an off-chain bearer token.
-      No blockchain delay after the first deposit.
-    </p>
+    <div class="s-label">Sessions</div>
+    <div class="s-title">Deposit once, instant bearer requests</div>
     <div class="session-grid">
       <div class="sess-card">
         <div class="sess-num">1. Open</div>
@@ -770,22 +766,24 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
       </div>
       <div id="sess-srv" class="tab-panel active">
         <div class="int-code"><pre><span class="kw">import</span> { Mppx, Store } <span class="kw">from</span> <span class="str">'mppx/server'</span>
-<span class="kw">import</span> { zcashSession } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+<span class="kw">import</span> { zcashSession, NapiCryptoClient } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+
+<span class="kw">const</span> crypto = <span class="kw">new</span> <span class="fn">NapiCryptoClient</span>(ZEBRAD_RPC)
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
   methods: [<span class="fn">zcashSession</span>({
-    orchardIvk: IVK,
-    crypto: cryptoClient,
+    orchardIvk: process.env.ORCHARD_IVK,
+    crypto,
     store: Store.<span class="fn">memory</span>(),
     recipient: ADDRESS,
     network: <span class="str">'mainnet'</span>,
-    suggestedDeposit: <span class="num">100000</span>,  <span class="cm">// 0.001 ZEC</span>
+    suggestedDeposit: <span class="num">100000</span>,
     unitType: <span class="str">'request'</span>,
-    sendRefund: <span class="kw">async</span> ({ to, amountZat, memo }) => {
-      <span class="kw">return</span> wallet.<span class="fn">send</span>(to, amountZat, memo)
-    },
+    sendRefund: <span class="kw">async</span> ({ to, amountZat, memo }) =>
+      wallet.<span class="fn">send</span>(to, amountZat, memo),
   })],
-  secretKey: SECRET,
+  realm: <span class="str">'my-api'</span>,
+  secretKey: process.env.MPP_SECRET_KEY,
 })</pre></div>
       </div>
       <div id="sess-cli" class="tab-panel">
@@ -842,10 +840,6 @@ session.<span class="fn">close</span>()
   <section id="cli" class="s-border">
     <div class="s-label">CLI</div>
     <div class="s-title">npx zimppy</div>
-    <p class="s-desc">
-      Wallet creation, payments, sessions &mdash; one command.
-      No config files, no env vars. Works with any MPP-enabled API.
-    </p>
     <div class="cli-grid">
       <div class="cli-cmds">
         <div class="cli-cmd">
@@ -900,10 +894,9 @@ session.<span class="fn">close</span>()
     <div class="foot-inner">
       <div class="foot-l"><em>zimppy</em> &mdash; private machine payments on Zcash</div>
       <ul class="foot-links">
-        <li><a href="https://github.com/AgitoReiworworking/zimppy">GitHub</a></li>
-        <li><a href="https://www.npmjs.com/package/zimppy-ts">npm</a></li>
-        <li><a href="https://crates.io/crates/zimppy-rs">crates.io</a></li>
-        <li><a href="https://mpp.dev">MPP Spec</a></li>
+        <li><a href="https://github.com/betterclever/zimppy" target="_blank">GitHub</a></li>
+        <li><a href="https://mpp.dev" target="_blank">MPP Spec</a></li>
+        <li><a href="https://mpp.dev/payment-methods" target="_blank">Payment Methods</a></li>
       </ul>
     </div>
   </div>
