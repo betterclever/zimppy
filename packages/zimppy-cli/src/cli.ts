@@ -423,8 +423,12 @@ async function sendViaWallet(cfg: ZimppyConfig, params: { to: string; amountZat:
 
   const wallet = await openWallet(cfg)
   process.stderr.write('  Syncing wallet...')
-  // Multiple syncs needed after recent transactions to update shard tree
-  for (let i = 0; i < 3; i++) await wallet.sync()
+  // Sync until fully caught up — zingolib shard tree needs multiple passes
+  // after recent transactions to update Sapling and Orchard note trees
+  let synced = false
+  for (let i = 0; i < 10 && !synced; i++) {
+    synced = await wallet.sync()
+  }
   console.error(' done')
 
   process.stderr.write('  Broadcasting transaction...')
@@ -434,6 +438,16 @@ async function sendViaWallet(cfg: ZimppyConfig, params: { to: string; amountZat:
   console.error('')
 
   await waitForConfirmation(cfg, txid)
+
+  // Re-sync after confirmation to update shard tree with change output.
+  // Without this, the next send fails with "shard store checkpoint not found".
+  process.stderr.write('  Syncing post-confirmation...')
+  let postSynced = false
+  for (let i = 0; i < 10 && !postSynced; i++) {
+    postSynced = await wallet.sync()
+  }
+  console.error(' done')
+
   return txid
 }
 
