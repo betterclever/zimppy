@@ -20,12 +20,11 @@ export const sessionRequestSchema = z.object({
   amount: z.string(),
   currency: z.string(),
   recipient: z.string(),
-  depositAmount: z.optional(z.string()),
+  suggestedDeposit: z.optional(z.string()),
+  unitType: z.optional(z.string()),
   methodDetails: z.optional(z.object({
     network: z.optional(z.enum(['testnet', 'mainnet'])),
     memo: z.optional(z.string()),
-    idleTimeout: z.optional(z.number()),
-    unitType: z.optional(z.string()),
   })),
 })
 
@@ -407,7 +406,7 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
       }
 
       // Open (first request — send deposit)
-      const depositAmount = challenge.request.depositAmount ?? amount
+      const depositAmount = challenge.request.suggestedDeposit ?? amount
       console.error(`[session:client] Opening session, depositing ${depositAmount} zat...`)
       const depositTxid = await options.sendPayment({
         to: recipient,
