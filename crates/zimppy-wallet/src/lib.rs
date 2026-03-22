@@ -169,6 +169,28 @@ impl ZimppyWallet {
         self.client.wallet.read().await.mnemonic_phrase()
     }
 
+    /// Get the Orchard Incoming Viewing Key (IVK) as a hex string.
+    /// Derived from the wallet's spending or viewing key.
+    pub async fn orchard_ivk(&self) -> Result<String, WalletError> {
+        use zcash_keys::keys::UnifiedFullViewingKey;
+        use zip32::Scope;
+
+        let wallet = self.client.wallet.read().await;
+        let account_id = zip32::AccountId::ZERO;
+        let key_store = wallet.unified_key_store
+            .get(&account_id)
+            .ok_or_else(|| WalletError::Address("no key store for account 0".to_string()))?;
+
+        let ufvk = UnifiedFullViewingKey::try_from(key_store)
+            .map_err(|e| WalletError::Address(format!("failed to derive UFVK: {e:?}")))?;
+
+        let orchard_fvk = ufvk.orchard()
+            .ok_or_else(|| WalletError::Address("no Orchard key in wallet".to_string()))?;
+
+        let ivk = orchard_fvk.to_ivk(Scope::External);
+        Ok(hex::encode(ivk.to_bytes()))
+    }
+
     /// Get the network name ("testnet" or "mainnet").
     pub fn network(&self) -> &str {
         // Access via the config's chain type

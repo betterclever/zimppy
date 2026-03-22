@@ -521,17 +521,12 @@
 <span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
-  methods: [<span class="fn">zcash</span>({
-    orchardIvk: process.env.ORCHARD_IVK,
-    rpcEndpoint: process.env.ZEBRAD_RPC,
-  })],
+  methods: [<span class="kw">await</span> <span class="fn">zcash</span>({ wallet: <span class="str">'server'</span> })],
 })
 
 <span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">charge</span>({
   amount: <span class="str">'42000'</span>,
   currency: <span class="str">'zec'</span>,
-  recipient: ADDRESS,
-  methodDetails: { network: <span class="str">'mainnet'</span> },
 })(request)
 
 <span class="kw">if</span> (result.status === <span class="num">402</span>) <span class="kw">return</span> result.challenge
@@ -568,19 +563,10 @@
         </div>
         <div id="cli-ts" class="tab-panel active">
           <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
-<span class="kw">import</span> { zcashClient } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
+<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
-  methods: [<span class="fn">zcashClient</span>({
-    <span class="fn">createPayment</span>: <span class="kw">async</span> ({ challenge, challengeId }) => {
-      <span class="kw">const</span> memo = challenge.methodDetails?.memo
-        ?.<span class="fn">replace</span>(<span class="str">'{id}'</span>, challengeId) ?? challengeId
-      <span class="kw">const</span> txid = <span class="kw">await</span> wallet.<span class="fn">send</span>(
-        challenge.recipient, challenge.amount, memo,
-      )
-      <span class="kw">return</span> { txid }
-    },
-  })],
+  methods: [<span class="fn">zcash</span>({ wallet: <span class="str">'default'</span> })],
 })
 
 <span class="cm">// 402 → pay → retry handled automatically</span>
@@ -760,33 +746,30 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
         <button class="tab-btn" onclick="switchTab(this, 'sess-sse')">SSE Streaming</button>
       </div>
       <div id="sess-srv" class="tab-panel active">
-        <div class="int-code"><pre><span class="kw">import</span> { Mppx, Store } <span class="kw">from</span> <span class="str">'mppx/server'</span>
-<span class="kw">import</span> { zcashSession, NapiCryptoClient } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
+        <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/server'</span>
+<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
-  methods: [<span class="fn">zcashSession</span>({
-    orchardIvk: process.env.ORCHARD_IVK,
-    crypto: <span class="kw">new</span> <span class="fn">NapiCryptoClient</span>(process.env.ZEBRAD_RPC),
-    store: Store.<span class="fn">memory</span>(),
-    recipient: ADDRESS,
-    network: <span class="str">'mainnet'</span>,
+  methods: [<span class="kw">await</span> zcash.<span class="fn">session</span>({
+    wallet: <span class="str">'server'</span>,
     suggestedDeposit: <span class="num">100000</span>,
     unitType: <span class="str">'request'</span>,
-    sendRefund: <span class="kw">async</span> ({ to, amountZat, memo }) =>
-      wallet.<span class="fn">send</span>(to, amountZat, memo),
   })],
-})</pre></div>
+})
+
+<span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">session</span>({
+  amount: <span class="str">'5000'</span>,
+  unitType: <span class="str">'request'</span>,
+})(request)
+
+<span class="kw">if</span> (result.status === <span class="num">402</span>) <span class="kw">return</span> result.challenge
+<span class="kw">return</span> result.<span class="fn">withReceipt</span>(Response.<span class="fn">json</span>({ data }))</pre></div>
       </div>
       <div id="sess-cli" class="tab-panel">
         <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
-<span class="kw">import</span> { zcashSessionClient } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
+<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
 
-<span class="kw">const</span> session = <span class="fn">zcashSessionClient</span>({
-  sendPayment: <span class="kw">async</span> ({ to, amountZat, memo }) => {
-    <span class="kw">return</span> wallet.<span class="fn">send</span>(to, amountZat, memo)
-  },
-  refundAddress: MY_ADDRESS,
-})
+<span class="kw">const</span> session = zcash.<span class="fn">session</span>({ wallet: <span class="str">'default'</span> })
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({ methods: [session] })
 

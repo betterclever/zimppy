@@ -232,6 +232,16 @@ impl ZimppyWalletNapi {
         wallet.seed_phrase().await
     }
 
+    /// Get the Orchard Incoming Viewing Key (IVK) as a hex string.
+    #[napi]
+    pub async fn orchard_ivk(&self) -> napi::Result<String> {
+        let wallet = self.wallet.lock().await;
+        wallet
+            .orchard_ivk()
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
     /// Get the network name.
     #[napi]
     pub fn network(&self) -> String {

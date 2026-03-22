@@ -379,8 +379,8 @@ export const zcashSessionServer = zcashSession
 export interface ZcashSessionClientOptions {
   /** Function to send a real Zcash payment and return the txid */
   sendPayment: (params: { to: string; amountZat: string; memo: string }) => Promise<string>
-  /** Client's address for receiving refunds */
-  refundAddress: string
+  /** Client's address for receiving refunds (string or async resolver) */
+  refundAddress: string | (() => Promise<string>)
 }
 
 export function zcashSessionClient(options: ZcashSessionClientOptions) {
@@ -450,12 +450,16 @@ export function zcashSessionClient(options: ZcashSessionClientOptions) {
       const bearerSecret = randomBytes(32).toString('hex')
       activeSession = { sessionId: '', bearer: bearerSecret }
 
+      const refundAddr = typeof options.refundAddress === 'function'
+        ? await options.refundAddress()
+        : options.refundAddress
+
       return Credential.serialize({
         challenge,
         payload: {
           action: 'open' as const,
           depositTxid,
-          refundAddress: options.refundAddress,
+          refundAddress: refundAddr,
           bearerSecret,
         },
       })

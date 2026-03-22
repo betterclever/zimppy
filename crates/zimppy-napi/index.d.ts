@@ -33,5 +33,6 @@ export declare class ZimppyWalletNapi {
   balance(): Promise<NapiWalletBalance>
   send(to: string, amountZat: string, memo?: string | null): Promise<string>
   seedPhrase(): Promise<string | null>
+  orchardIvk(): Promise<string>
   network(): string
 }

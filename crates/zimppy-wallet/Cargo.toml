@@ -9,7 +9,9 @@ description = "Native Zcash wallet for Zimppy, powered by zingolib"
 [dependencies]
 zingolib = { git = "https://github.com/zingolabs/zingolib.git", tag = "zingolib_v3.0.0" }
 zcash_protocol = "0.7"
+zcash_keys = { version = "0.12", features = ["orchard"] }
 zcash_address = "0.10"
+hex = "0.4"
 bip0039 = { version = "0.13", features = ["rand"] }
 rustls = "0.23"
 zip32 = "0.2"
