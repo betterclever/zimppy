@@ -518,15 +518,13 @@
         </div>
         <div id="srv-ts" class="tab-panel active">
           <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/server'</span>
-<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
   methods: [<span class="fn">zcash</span>({
     orchardIvk: process.env.ORCHARD_IVK,
     rpcEndpoint: process.env.ZEBRAD_RPC,
   })],
-  realm: <span class="str">'my-api'</span>,
-  secretKey: process.env.MPP_SECRET_KEY,
 })
 
 <span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">charge</span>({
@@ -546,19 +544,16 @@
 <span class="kw">let</span> charge = ZcashChargeMethod::<span class="fn">new</span>(
   &rpc_endpoint, &address, &orchard_ivk,
 );
-<span class="kw">let</span> mpp = Mpp::<span class="fn">new</span>(charge, <span class="str">"my-api"</span>, &secret_key);
+<span class="kw">let</span> mpp = Mpp::<span class="fn">new</span>(charge, <span class="str">"my-api"</span>, &secret);
 
 <span class="cm">// axum handler:</span>
-<span class="kw">let</span> auth = headers.<span class="fn">get</span>(<span class="str">"Authorization"</span>);
 <span class="kw">match</span> mpp.<span class="fn">verify_credential</span>(&credential).<span class="kw">await</span> {
-  Ok(receipt) => {
-    <span class="cm">// Payment verified — serve content</span>
-    <span class="kw">let</span> resp = (StatusCode::OK, Json(data));
-    ([(header::HeaderName::<span class="fn">from_static</span>(
-      <span class="str">"payment-receipt"</span>), receipt.<span class="fn">to_header</span>()
-    )], resp).<span class="fn">into_response</span>()
-  }
-  Err(_) => <span class="fn">issue_402_challenge</span>(&mpp),
+  Ok(receipt) => (
+    [(header::<span class="fn">from_static</span>(<span class="str">"payment-receipt"</span>),
+      receipt.<span class="fn">to_header</span>())],
+    Json(data),
+  ).<span class="fn">into_response</span>(),
+  Err(_) => <span class="fn">issue_402</span>(&mpp),
 }</pre></div>
         </div>
       </div>
@@ -573,7 +568,7 @@
         </div>
         <div id="cli-ts" class="tab-panel active">
           <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
-<span class="kw">import</span> { zcashClient } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+<span class="kw">import</span> { zcashClient } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
   methods: [<span class="fn">zcashClient</span>({
@@ -766,14 +761,12 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
       </div>
       <div id="sess-srv" class="tab-panel active">
         <div class="int-code"><pre><span class="kw">import</span> { Mppx, Store } <span class="kw">from</span> <span class="str">'mppx/server'</span>
-<span class="kw">import</span> { zcashSession, NapiCryptoClient } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
-
-<span class="kw">const</span> crypto = <span class="kw">new</span> <span class="fn">NapiCryptoClient</span>(ZEBRAD_RPC)
+<span class="kw">import</span> { zcashSession, NapiCryptoClient } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
 
 <span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
   methods: [<span class="fn">zcashSession</span>({
     orchardIvk: process.env.ORCHARD_IVK,
-    crypto,
+    crypto: <span class="kw">new</span> <span class="fn">NapiCryptoClient</span>(process.env.ZEBRAD_RPC),
     store: Store.<span class="fn">memory</span>(),
     recipient: ADDRESS,
     network: <span class="str">'mainnet'</span>,
@@ -782,13 +775,11 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
     sendRefund: <span class="kw">async</span> ({ to, amountZat, memo }) =>
       wallet.<span class="fn">send</span>(to, amountZat, memo),
   })],
-  realm: <span class="str">'my-api'</span>,
-  secretKey: process.env.MPP_SECRET_KEY,
 })</pre></div>
       </div>
       <div id="sess-cli" class="tab-panel">
         <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
-<span class="kw">import</span> { zcashSessionClient } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+<span class="kw">import</span> { zcashSessionClient } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
 
 <span class="kw">const</span> session = <span class="fn">zcashSessionClient</span>({
   sendPayment: <span class="kw">async</span> ({ to, amountZat, memo }) => {
@@ -809,7 +800,7 @@ session.<span class="fn">close</span>()
 <span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)</pre></div>
       </div>
       <div id="sess-sse" class="tab-panel">
-        <div class="int-code"><pre><span class="kw">import</span> { serveStream, toResponse } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+        <div class="int-code"><pre><span class="kw">import</span> { serveStream, toResponse } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
 
 <span class="cm">// Server: metered LLM token streaming</span>
 <span class="kw">const</span> stream = <span class="fn">serveStream</span>({
@@ -823,7 +814,7 @@ session.<span class="fn">close</span>()
 <span class="kw">return</span> <span class="fn">toResponse</span>(stream)
 
 <span class="cm">// Client: consume the stream</span>
-<span class="kw">import</span> { iterateData, isEventStream } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+<span class="kw">import</span> { iterateData, isEventStream } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
 
 <span class="kw">if</span> (<span class="fn">isEventStream</span>(response)) {
   <span class="kw">for await</span> (<span class="kw">const</span> token <span class="kw">of</span> <span class="fn">iterateData</span>(response)) {
