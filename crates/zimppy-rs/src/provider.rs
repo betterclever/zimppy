@@ -102,12 +102,10 @@ impl PaymentProvider for ZcashPaymentProvider {
         let amount_str = request["amount"]
             .as_str()
             .ok_or_else(|| MppError::InvalidConfig("missing amount in challenge".to_string()))?;
-        let memo = request["memo"]
+        let memo = request["methodDetails"]["memo"]
             .as_str()
-            .ok_or_else(|| MppError::InvalidConfig("missing memo in challenge".to_string()))?;
-        let challenge_id = request["challengeId"]
-            .as_str()
-            .ok_or_else(|| MppError::InvalidConfig("missing challengeId in challenge".to_string()))?;
+            .ok_or_else(|| MppError::InvalidConfig("missing methodDetails.memo in challenge".to_string()))?
+            .replace("{id}", &challenge.id);
 
         let amount_zat: u64 = amount_str.parse()
             .map_err(|_| MppError::InvalidConfig("invalid amount".to_string()))?;
@@ -115,10 +113,10 @@ impl PaymentProvider for ZcashPaymentProvider {
         eprintln!("[ZcashProvider] Received 402 challenge:");
         eprintln!("[ZcashProvider]   recipient: {}", &recipient[..20.min(recipient.len())]);
         eprintln!("[ZcashProvider]   amount: {} zat", amount_zat);
-        eprintln!("[ZcashProvider]   memo: {memo}");
+        eprintln!("[ZcashProvider]   memo: {}", &memo);
 
         // Send real ZEC
-        let txid = self.send_payment(recipient, amount_zat, memo).await?;
+        let txid = self.send_payment(recipient, amount_zat, &memo).await?;
 
         // Wait for confirmation
         self.wait_for_confirmation(&txid).await?;
@@ -130,7 +128,6 @@ impl PaymentProvider for ZcashPaymentProvider {
 
         credential.payload = serde_json::json!({
             "txid": txid,
-            "challengeId": challenge_id,
         });
 
         eprintln!("[ZcashProvider] Credential ready with txid {}", &txid[..16]);

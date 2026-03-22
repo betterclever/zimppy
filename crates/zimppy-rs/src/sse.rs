@@ -1,7 +1,7 @@
 //! SSE Streamed Payments — pay-per-token metered streaming.
 //!
 //! Wraps an async stream of content chunks and deducts from a session
-//! balance per chunk. Emits `payment-need-voucher` when balance is
+//! balance per chunk. Emits `payment-need-topup` when balance is
 //! exhausted and waits for a topUp before resuming.
 
 use crate::session::{SessionError, ZcashSessionMethod};
@@ -58,7 +58,7 @@ impl SseEvent {
                     "requiredAmount": required_amount,
                     "currentBalance": current_balance,
                 });
-                format!("event: payment-need-voucher\ndata: {json}\n\n")
+                format!("event: payment-need-topup\ndata: {json}\n\n")
             }
             Self::PaymentReceipt { session_id, total_spent, total_chunks } => {
                 let json = serde_json::json!({

@@ -3,7 +3,7 @@
  *
  * The server streams data (e.g., LLM tokens) and deducts from the
  * session balance per chunk. When balance runs out, it pauses the
- * stream and emits a `payment-need-voucher` event. The client sends
+ * stream and emits a `payment-need-topup` event. The client sends
  * a topUp, and the stream resumes.
  *
  * Event types:

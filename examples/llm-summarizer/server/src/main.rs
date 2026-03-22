@@ -515,7 +515,7 @@ async fn stream_summarize(
                     });
                     eprintln!("[STREAM] Balance exhausted after {total_chunks} tokens");
                     yield Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default()
-                        .event("payment-need-voucher")
+                        .event("payment-need-topup")
                         .data(need.to_string()));
                     break;
                 }
@@ -582,7 +582,7 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
             (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
         ],
         Json(serde_json::json!({
-            "type": "https://zimppy.dev/problems/payment-required",
+            "type": "https://paymentauth.org/problems/payment-required",
             "title": "Payment Required",
             "status": 402,
             "detail": format!("Send {} zat to summarize your document", state.amount_zat),
@@ -597,7 +597,7 @@ fn problem_response(status: u16, title: &str, detail: &str) -> axum::response::R
         code,
         [(header::CONTENT_TYPE, PROBLEM_JSON.to_string())],
         Json(serde_json::json!({
-            "type": format!("https://zimppy.dev/problems/{}", title.to_lowercase().replace(' ', "-")),
+            "type": format!("https://paymentauth.org/problems/{}", title.to_lowercase().replace(' ', "-")),
             "title": title,
             "status": status,
             "detail": detail,

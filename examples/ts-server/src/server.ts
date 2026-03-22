@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { Credential } from 'mppx'
@@ -63,14 +62,14 @@ function getChargeRequest(request: Request) {
     }
   }
 
-  const challengeId = randomUUID()
   return {
     amount: PRICE_ZAT,
-    currency: 'ZEC',
+    currency: 'zec',
     recipient: walletConfig.address,
-    network: walletConfig.network,
-    memo: `zimppy:${challengeId}`,
-    challengeId,
+    methodDetails: {
+      network: walletConfig.network,
+      memo: `zimppy:{id}`,
+    },
   }
 }
 
