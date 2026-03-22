@@ -13,6 +13,15 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { Credential, Method, Receipt, Store, z } from 'mppx'
 import type { NapiCryptoClient } from './crypto-client.js'
+import {
+  DepositConsumedError,
+  DepositVerificationError,
+  InsufficientBalanceError,
+  InvalidBearerError,
+  SessionClosedError,
+  SessionNotFoundError,
+  TopUpConsumedError,
+} from './errors.js'
 
 // ── Session schemas ─────────────────────────────────────────────────
 
@@ -178,7 +187,7 @@ export function zcashSession(options: ZcashSessionServerOptions) {
 
     // Replay guard
     if (await store.get(consumedKey)) {
-      throw new Error('deposit already consumed')
+      throw new DepositConsumedError(depositTxid)
     }
 
     // Verify shielded deposit on-chain
@@ -191,7 +200,7 @@ export function zcashSession(options: ZcashSessionServerOptions) {
     })
 
     if (!verifyResult.verified || verifyResult.outputsDecrypted === 0) {
-      throw new Error('deposit verification failed')
+      throw new DepositVerificationError()
     }
 
     const depositAmount = Number(verifyResult.observedAmountZat)
@@ -234,18 +243,18 @@ export function zcashSession(options: ZcashSessionServerOptions) {
 
     return withSessionLock(sessionId, async () => {
       const state = await store.get(`zcash-session:${sessionId}`) as SessionState | null
-      if (!state) throw new Error('session not found')
-      if (state.status !== 'active') throw new Error(`session is ${state.status}`)
+      if (!state) throw new SessionNotFoundError(sessionId)
+      if (state.status !== 'active') throw new SessionClosedError(sessionId, state.status)
 
       // Verify bearer
       if (sha256hex(bearer) !== state.bearerHash) {
-        throw new Error('invalid bearer')
+        throw new InvalidBearerError()
       }
 
       // Check balance
       const remaining = state.depositAmountZat - state.spentZat
       if (chargeAmount > remaining) {
-        throw new Error(`insufficient balance: need ${chargeAmount}, have ${remaining}`)
+        throw new InsufficientBalanceError(chargeAmount, remaining)
       }
 
       // Deduct
@@ -272,12 +281,12 @@ export function zcashSession(options: ZcashSessionServerOptions) {
 
     return withSessionLock(sessionId, async () => {
       const state = await store.get(`zcash-session:${sessionId}`) as SessionState | null
-      if (!state) throw new Error('session not found')
-      if (state.status !== 'active') throw new Error(`session is ${state.status}`)
+      if (!state) throw new SessionNotFoundError(sessionId)
+      if (state.status !== 'active') throw new SessionClosedError(sessionId, state.status)
 
       // Replay guard
       if (await store.get(consumedKey)) {
-        throw new Error('top-up already consumed')
+        throw new TopUpConsumedError(topUpTxid)
       }
 
       // Verify shielded top-up on-chain
@@ -290,7 +299,7 @@ export function zcashSession(options: ZcashSessionServerOptions) {
       })
 
       if (!verifyResult.verified || verifyResult.outputsDecrypted === 0) {
-        throw new Error('top-up verification failed')
+        throw new DepositVerificationError('top-up verification failed')
       }
 
       const topUpAmount = Number(verifyResult.observedAmountZat)
@@ -317,12 +326,12 @@ export function zcashSession(options: ZcashSessionServerOptions) {
 
     return withSessionLock(sessionId, async () => {
       const state = await store.get(`zcash-session:${sessionId}`) as SessionState | null
-      if (!state) throw new Error('session not found')
-      if (state.status === 'closed') throw new Error('session already closed')
+      if (!state) throw new SessionNotFoundError(sessionId)
+      if (state.status === 'closed') throw new SessionClosedError(sessionId, state.status)
 
       // Verify bearer
       if (sha256hex(bearer) !== state.bearerHash) {
-        throw new Error('invalid bearer')
+        throw new InvalidBearerError()
       }
 
       // Transition to closing (prevents double-refund)

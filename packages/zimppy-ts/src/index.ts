@@ -34,3 +34,13 @@ export type {
 } from './session.js'
 export { serveStream, toResponse, parseEvent, isEventStream, iterateData } from './sse.js'
 export type { ServeStreamOptions, NeedTopupEvent, NeedVoucherEvent, StreamReceipt, SseEvent } from './sse.js'
+export {
+  SessionNotFoundError,
+  SessionClosedError,
+  InsufficientBalanceError,
+  InvalidBearerError,
+  DepositConsumedError,
+  DepositVerificationError,
+  TopUpConsumedError,
+} from './errors.js'
+export type { SessionError } from './errors.js'
