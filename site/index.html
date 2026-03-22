@@ -244,6 +244,25 @@
     .int-code .cm { color: var(--text-3); }
     .int-code .num { color: var(--yellow); }
 
+    /* ── Tabs for code ── */
+    .tab-bar {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      padding: 0.7rem 1.25rem; font-family: var(--mono); font-size: 0.75rem;
+      font-weight: 500; color: var(--text-3); background: none; border: none;
+      cursor: pointer; transition: all 0.15s; position: relative;
+      letter-spacing: 0.02em;
+    }
+    .tab-btn:hover { color: var(--text-2); }
+    .tab-btn.active { color: var(--accent); }
+    .tab-btn.active::after {
+      content: ''; position: absolute; bottom: -1px; left: 0; right: 0;
+      height: 2px; background: var(--accent);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
     /* ── Verify ── */
     .vf-flow {
       display: flex; flex-direction: column; gap: 0; max-width: 700px;
@@ -311,6 +330,36 @@
       font-size: 0.85rem; color: var(--text-2);
     }
 
+    /* ── Session flow ── */
+    .session-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.75rem;
+      margin-top: 2rem;
+    }
+    .sess-card {
+      padding: 1.25rem; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg-card);
+      position: relative;
+    }
+    .sess-card::after {
+      content: ''; position: absolute; right: -12px; top: 50%;
+      transform: translateY(-50%);
+      border: 5px solid transparent; border-left-color: var(--text-3);
+    }
+    .sess-card:last-child::after { display: none; }
+    .sess-num {
+      font-family: var(--mono); font-size: 0.65rem; font-weight: 600;
+      color: var(--accent); margin-bottom: 0.5rem;
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .sess-card h4 { font-size: 0.82rem; font-weight: 600; margin-bottom: 0.35rem; }
+    .sess-card p { font-size: 0.74rem; color: var(--text-2); line-height: 1.45; }
+    .sess-tag {
+      display: inline-block; font-family: var(--mono); font-size: 0.62rem;
+      padding: 0.1rem 0.35rem; border-radius: 3px; margin-top: 0.4rem;
+    }
+    .sess-tag.chain { background: rgba(251,191,36,0.1); color: var(--yellow); }
+    .sess-tag.instant { background: rgba(110,231,183,0.1); color: var(--green); }
+
     /* ── CLI ── */
     .cli-grid {
       display: grid; grid-template-columns: 1fr 1fr; gap: 3rem;
@@ -353,8 +402,13 @@
       .hero { grid-template-columns: 1fr; gap: 2.5rem; padding-top: 8rem; }
       .why-grid { grid-template-columns: 1fr; }
       .compare, .int-grid, .cli-grid, .vf-layout { grid-template-columns: 1fr; }
+      .session-grid { grid-template-columns: 1fr 1fr; }
       .nav-links { display: none; }
       .hero h1 { font-size: 3.6rem; }
+    }
+    @media (max-width: 540px) {
+      .session-grid { grid-template-columns: 1fr; }
+      .sess-card::after { display: none; }
     }
   </style>
 </head>
@@ -366,16 +420,17 @@
     <li><a href="#why">Why Shielded</a></li>
     <li><a href="#how-it-works">How It Works</a></li>
     <li><a href="#integrate">Integrate</a></li>
+    <li><a href="#sessions">Sessions</a></li>
     <li><a href="#cli">CLI</a></li>
     <li><a href="https://mpp.dev" target="_blank">MPP Spec</a></li>
   </ul>
-  <a href="https://github.com/betterclever/zimppy" class="nav-gh" target="_blank">
+  <a href="https://github.com/AgitoReiworworking/zimppy" class="nav-gh" target="_blank">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
     GitHub
   </a>
 </nav>
 
-<!-- ══ HERO ══ -->
+<!-- HERO -->
 <div class="w">
   <section class="hero">
     <div class="hero-text">
@@ -387,8 +442,8 @@
         receiver, amount, and memo.
       </p>
       <div class="hero-btns">
-        <a href="https://github.com/betterclever/zimppy#quick-start" class="btn btn-p">Get Started</a>
-        <a href="#integrate" class="btn btn-s">Add to your API</a>
+        <a href="#integrate" class="btn btn-p">Get Started</a>
+        <a href="#how-it-works" class="btn btn-s">How It Works</a>
       </div>
     </div>
     <div class="terminal" id="demo-term">
@@ -403,7 +458,7 @@
   </section>
 </div>
 
-<!-- ══ WHY SHIELDED ══ -->
+<!-- WHY SHIELDED -->
 <div class="w">
   <section id="why" class="s-border">
     <div class="s-label">Why shielded payments</div>
@@ -446,72 +501,119 @@
   </section>
 </div>
 
-<!-- ══ INTEGRATE ══ -->
+<!-- INTEGRATE -->
 <div class="w">
   <section id="integrate" class="s-border">
     <div class="s-label">Add to your stack</div>
     <div class="s-title">Accept private payments in 5 minutes</div>
     <p class="s-desc">
-      Drop zimppy into your existing API server. TypeScript or Rust &mdash;
+      Drop zimppy into your existing API. TypeScript or Rust &mdash;
       same HTTP 402 flow, same MPP spec, fully shielded underneath.
     </p>
     <div class="int-grid">
+      <!-- Server -->
       <div class="int-card">
-        <div class="int-head">
-          <h3>TypeScript Server</h3>
-          <span class="int-lang">mppx + zimppy-ts</span>
+        <div class="tab-bar">
+          <button class="tab-btn active" onclick="switchTab(this, 'srv-ts')">TypeScript</button>
+          <button class="tab-btn" onclick="switchTab(this, 'srv-rs')">Rust</button>
         </div>
-        <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/server'</span>
+        <div id="srv-ts" class="tab-panel active">
+          <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/server'</span>
 <span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
 
-<span class="kw">const</span> payment = Mppx.<span class="fn">create</span>({
-  methods: [<span class="fn">zcash</span>({
-    orchardIvk: config.orchardIvk,
-    rpcEndpoint: <span class="str">'https://zebrad.example.com'</span>,
-  })],
-  secretKey: <span class="str">'your-hmac-secret'</span>,
+<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
+  methods: [<span class="fn">zcash</span>({ orchardIvk: IVK })],
+  secretKey: SECRET,
 })
 
-<span class="cm">// In your handler:</span>
-<span class="kw">const</span> result = <span class="kw">await</span> payment.<span class="fn">charge</span>({
-  amount: <span class="str">'10000'</span>, currency: <span class="str">'zec'</span>,
-  recipient: config.address,
-  methodDetails: { network: config.network },
+<span class="cm">// Any route handler:</span>
+<span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">charge</span>({
+  amount: <span class="str">'10000'</span>,
+  currency: <span class="str">'zec'</span>,
+  recipient: ADDRESS,
+  methodDetails: { network: <span class="str">'mainnet'</span> },
 })(request)
 
 <span class="kw">if</span> (result.status === <span class="num">402</span>) <span class="kw">return</span> result.challenge
-<span class="kw">return</span> result.<span class="fn">withReceipt</span>(Response.<span class="fn">json</span>({ data }))</pre></div>
-      </div>
-      <div class="int-card">
-        <div class="int-head">
-          <h3>Rust Server</h3>
-          <span class="int-lang">zimppy-rs + axum</span>
+<span class="kw">return</span> result.<span class="fn">withReceipt</span>(
+  Response.<span class="fn">json</span>({ fortune: <span class="str">'...'</span> })
+)</pre></div>
         </div>
-        <div class="int-code"><pre><span class="kw">use</span> zimppy_rs::<span class="fn">ZcashChargeMethod</span>;
+        <div id="srv-rs" class="tab-panel">
+          <div class="int-code"><pre><span class="kw">use</span> mpp::{Mpp, <span class="fn">compute_challenge_id</span>};
+<span class="kw">use</span> zimppy_rs::{ZcashChargeMethod};
 
 <span class="kw">let</span> charge = <span class="fn">ZcashChargeMethod</span>::<span class="fn">new</span>(
-    &rpc_endpoint,
-    &config.address,
-    &config.orchard_ivk,
+  &rpc, &address, &ivk,
 );
+<span class="kw">let</span> mpp = Mpp::<span class="fn">new</span>(charge, <span class="str">"my-api"</span>, &key);
 
 <span class="cm">// In your axum handler:</span>
-<span class="kw">match</span> charge.<span class="fn">verify_payment</span>(
-    &txid, &challenge_id, amount_zat
-).<span class="kw">await</span> {
-    Ok(outcome) <span class="kw">if</span> outcome.verified => {
-        <span class="cm">// outcome.observed_amount_zat</span>
-        <span class="cm">// outcome.memo_matched</span>
-        (StatusCode::OK, Json(data)).<span class="fn">into_response</span>()
-    }
-    _ => <span class="fn">issue_challenge</span>(state).<span class="kw">await</span>,
+<span class="kw">match</span> mpp.<span class="fn">verify_credential</span>(&auth_header) {
+  Ok(receipt) => {
+    <span class="cm">// Credential verified, serve content</span>
+    (StatusCode::OK, Json(data))
+      .<span class="fn">into_response</span>()
+  }
+  Err(_) => <span class="fn">issue_402</span>(&mpp),
 }</pre></div>
+        </div>
+      </div>
+      <!-- Client -->
+      <div class="int-card">
+        <div class="tab-bar">
+          <button class="tab-btn active" onclick="switchTab(this, 'cli-ts')">TypeScript</button>
+          <button class="tab-btn" onclick="switchTab(this, 'cli-rs')">Rust</button>
+        </div>
+        <div id="cli-ts" class="tab-panel active">
+          <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
+<span class="kw">import</span> { zcashClient } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+
+<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
+  methods: [<span class="fn">zcashClient</span>({
+    <span class="fn">createPayment</span>: <span class="kw">async</span> ({ challenge, challengeId }) => {
+      <span class="cm">// Send shielded ZEC, return txid</span>
+      <span class="kw">const</span> txid = <span class="kw">await</span> wallet.<span class="fn">send</span>(
+        challenge.recipient,
+        challenge.amount,
+        challengeId, <span class="cm">// memo binding</span>
+      )
+      <span class="kw">return</span> { txid }
+    },
+  })],
+})
+
+<span class="cm">// Just fetch — 402 handled automatically</span>
+<span class="kw">const</span> res = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(
+  <span class="str">'https://api.example.com/fortune'</span>
+)
+console.<span class="fn">log</span>(<span class="kw">await</span> res.<span class="fn">json</span>())</pre></div>
+        </div>
+        <div id="cli-rs" class="tab-panel">
+          <div class="int-code"><pre><span class="kw">use</span> mpp::client::{MppClient, PaymentProvider};
+<span class="kw">use</span> zimppy_rs::ZcashPaymentProvider;
+
+<span class="kw">let</span> provider = <span class="fn">ZcashPaymentProvider</span>::<span class="fn">new</span>(
+  wallet_config, &rpc_endpoint,
+);
+
+<span class="kw">let</span> client = MppClient::<span class="fn">new</span>()
+  .<span class="fn">with_provider</span>(provider);
+
+<span class="cm">// Auto-handles 402 → pay → retry</span>
+<span class="kw">let</span> response = client
+  .<span class="fn">get</span>(<span class="str">"https://api.example.com/fortune"</span>)
+  .<span class="fn">send</span>()
+  .<span class="kw">await</span>?;
+
+<span class="fn">println!</span>(<span class="str">"{}"</span>, response.<span class="fn">text</span>().<span class="kw">await</span>?);</pre></div>
+        </div>
       </div>
     </div>
   </section>
 </div>
 
-<!-- ══ HOW IT WORKS ══ -->
+<!-- HOW IT WORKS -->
 <div class="w">
   <section id="how-it-works" class="s-border">
     <div class="vf-layout">
@@ -534,11 +636,11 @@
           </div>
           <div class="vf-hl">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-            <span>Server verifies payment with a viewing key</span>
+            <span>Server verifies with a viewing key</span>
           </div>
           <div class="vf-hl">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            <span>Sessions skip the chain after first deposit</span>
+            <span>Sessions skip the chain after deposit</span>
           </div>
         </div>
       </div>
@@ -563,7 +665,7 @@
             <span class="vf-who server">Server</span>
             <span class="vf-title">402 Payment Required</span>
           </div>
-          <div class="vf-detail"><div class="vf-detail-inner">WWW-Authenticate: Payment<br>  method=<span style="color:var(--green)">"zcash"</span> intent=<span style="color:var(--green)">"charge"</span><br>  request=<span style="color:var(--cyan)">base64url({amount, currency, methodDetails})</span><br>  expires=<span style="color:var(--yellow)">"2026-03-22T12:00:00Z"</span><br>Cache-Control: <span style="color:var(--accent)">no-store</span></div></div>
+          <div class="vf-detail"><div class="vf-detail-inner">WWW-Authenticate: Payment<br>  method=<span style="color:var(--green)">"zcash"</span> intent=<span style="color:var(--green)">"charge"</span><br>  request=<span style="color:var(--cyan)">base64url({amount, currency, methodDetails})</span></div></div>
         </div>
       </div>
 
@@ -576,7 +678,7 @@
             <span class="vf-who agent">Agent</span>
             <span class="vf-title">Send shielded ZEC</span>
           </div>
-          <div class="vf-detail"><div class="vf-detail-inner"><span style="color:var(--green)">Orchard shielded transaction</span><br>amount: 10,000 zat &bull; memo: zimppy:ch_a8f3c2<br><span style="color:var(--text-3)">sender, receiver, amount all encrypted on-chain</span></div></div>
+          <div class="vf-detail"><div class="vf-detail-inner"><span style="color:var(--green)">Orchard shielded transaction</span><br>amount: 10,000 zat &bull; memo: zimppy:ch_a8f3c2<br><span style="color:var(--text-3)">sender, receiver, amount all encrypted</span></div></div>
         </div>
       </div>
 
@@ -589,7 +691,7 @@
             <span class="vf-who agent">Agent</span>
             <span class="vf-title">Retry with credential</span>
           </div>
-          <div class="vf-detail"><div class="vf-detail-inner">GET /api/fortune<br>Authorization: Payment <span style="color:var(--cyan)">base64url({</span><br>  <span style="color:var(--cyan)">challenge: {id, realm, method, intent, request},</span><br>  <span style="color:var(--cyan)">payload: {txid}})</span></div></div>
+          <div class="vf-detail"><div class="vf-detail-inner">Authorization: Payment <span style="color:var(--cyan)">base64url({</span><br>  <span style="color:var(--cyan)">challenge, payload: {txid}})</span></div></div>
         </div>
       </div>
 
@@ -602,7 +704,7 @@
             <span class="vf-who server">Server</span>
             <span class="vf-title">Decrypt &amp; verify</span>
           </div>
-          <div class="vf-detail"><div class="vf-detail-inner"><span style="color:var(--accent)">HMAC-SHA256</span> verifies challenge authenticity (stateless)<br><span style="color:var(--accent)">Orchard IVK</span> decrypts the shielded note<br><span style="color:var(--green)">&check;</span> amount &ge; required<br><span style="color:var(--green)">&check;</span> memo matches challenge ID<br><span style="color:var(--green)">&check;</span> not replayed</div></div>
+          <div class="vf-detail"><div class="vf-detail-inner"><span style="color:var(--accent)">HMAC-SHA256</span> challenge authenticity (stateless)<br><span style="color:var(--accent)">Orchard IVK</span> decrypts shielded note<br><span style="color:var(--green)">&check;</span> amount &bull; <span style="color:var(--green)">&check;</span> memo &bull; <span style="color:var(--green)">&check;</span> replay guard</div></div>
         </div>
       </div>
 
@@ -615,7 +717,7 @@
             <span class="vf-who server">Server</span>
             <span class="vf-title">200 OK + Receipt</span>
           </div>
-          <div class="vf-detail"><div class="vf-detail-inner"><span style="color:var(--yellow)">200</span> OK<br>Payment-Receipt: <span style="color:var(--green)">base64url({method, status, reference, timestamp})</span><br>Cache-Control: <span style="color:var(--accent)">private</span></div></div>
+          <div class="vf-detail"><div class="vf-detail-inner"><span style="color:var(--yellow)">200</span> OK<br>Payment-Receipt: <span style="color:var(--green)">base64url({method, status, reference})</span></div></div>
         </div>
       </div>
 
@@ -624,7 +726,118 @@
   </section>
 </div>
 
-<!-- ══ CLI ══ -->
+<!-- SESSIONS -->
+<div class="w">
+  <section id="sessions" class="s-border">
+    <div class="s-label">Prepaid sessions</div>
+    <div class="s-title">Deposit once, instant requests</div>
+    <p class="s-desc">
+      For streaming or high-frequency APIs. The client deposits ZEC once,
+      then authenticates every request with an off-chain bearer token.
+      No blockchain delay after the first deposit.
+    </p>
+    <div class="session-grid">
+      <div class="sess-card">
+        <div class="sess-num">1. Open</div>
+        <h4>Deposit ZEC</h4>
+        <p>Client sends a shielded deposit and a bearer secret. Server creates the session.</p>
+        <span class="sess-tag chain">on-chain</span>
+      </div>
+      <div class="sess-card">
+        <div class="sess-num">2. Bearer</div>
+        <h4>Instant requests</h4>
+        <p>Every request uses the bearer token. Server deducts from balance. No chain needed.</p>
+        <span class="sess-tag instant">instant</span>
+      </div>
+      <div class="sess-card">
+        <div class="sess-num">3. Top Up</div>
+        <h4>Add more ZEC</h4>
+        <p>Balance low? Send another shielded deposit. Session continues without interruption.</p>
+        <span class="sess-tag chain">on-chain</span>
+      </div>
+      <div class="sess-card">
+        <div class="sess-num">4. Close</div>
+        <h4>Get refund</h4>
+        <p>Close the session. Server refunds unused balance back to the client's address.</p>
+        <span class="sess-tag chain">on-chain</span>
+      </div>
+    </div>
+    <div class="int-card" style="margin-top: 1.5rem;">
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab(this, 'sess-srv')">Server</button>
+        <button class="tab-btn" onclick="switchTab(this, 'sess-cli')">Client</button>
+        <button class="tab-btn" onclick="switchTab(this, 'sess-sse')">SSE Streaming</button>
+      </div>
+      <div id="sess-srv" class="tab-panel active">
+        <div class="int-code"><pre><span class="kw">import</span> { Mppx, Store } <span class="kw">from</span> <span class="str">'mppx/server'</span>
+<span class="kw">import</span> { zcashSession } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+
+<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
+  methods: [<span class="fn">zcashSession</span>({
+    orchardIvk: IVK,
+    crypto: cryptoClient,
+    store: Store.<span class="fn">memory</span>(),
+    recipient: ADDRESS,
+    network: <span class="str">'mainnet'</span>,
+    suggestedDeposit: <span class="num">100000</span>,  <span class="cm">// 0.001 ZEC</span>
+    unitType: <span class="str">'request'</span>,
+    sendRefund: <span class="kw">async</span> ({ to, amountZat, memo }) => {
+      <span class="kw">return</span> wallet.<span class="fn">send</span>(to, amountZat, memo)
+    },
+  })],
+  secretKey: SECRET,
+})</pre></div>
+      </div>
+      <div id="sess-cli" class="tab-panel">
+        <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
+<span class="kw">import</span> { zcashSessionClient } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+
+<span class="kw">const</span> session = <span class="fn">zcashSessionClient</span>({
+  sendPayment: <span class="kw">async</span> ({ to, amountZat, memo }) => {
+    <span class="kw">return</span> wallet.<span class="fn">send</span>(to, amountZat, memo)
+  },
+  refundAddress: MY_ADDRESS,
+})
+
+<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({ methods: [session] })
+
+<span class="cm">// First fetch deposits, subsequent fetches use bearer</span>
+<span class="kw">const</span> r1 = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)  <span class="cm">// deposit on-chain</span>
+<span class="kw">const</span> r2 = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)  <span class="cm">// instant bearer</span>
+<span class="kw">const</span> r3 = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)  <span class="cm">// instant bearer</span>
+
+<span class="cm">// Done — close and get refund</span>
+session.<span class="fn">close</span>()
+<span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)</pre></div>
+      </div>
+      <div id="sess-sse" class="tab-panel">
+        <div class="int-code"><pre><span class="kw">import</span> { serveStream, toResponse } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+
+<span class="cm">// Server: metered LLM token streaming</span>
+<span class="kw">const</span> stream = <span class="fn">serveStream</span>({
+  generate: llm.<span class="fn">stream</span>(prompt),
+  sessionId,
+  tickCost: <span class="num">100</span>,    <span class="cm">// 100 zat per token</span>
+  deduct, getBalance,
+  signal: request.signal,
+})
+
+<span class="kw">return</span> <span class="fn">toResponse</span>(stream)
+
+<span class="cm">// Client: consume the stream</span>
+<span class="kw">import</span> { iterateData, isEventStream } <span class="kw">from</span> <span class="str">'zimppy-ts'</span>
+
+<span class="kw">if</span> (<span class="fn">isEventStream</span>(response)) {
+  <span class="kw">for await</span> (<span class="kw">const</span> token <span class="kw">of</span> <span class="fn">iterateData</span>(response)) {
+    process.stdout.<span class="fn">write</span>(token)
+  }
+}</pre></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- CLI -->
 <div class="w">
   <section id="cli" class="s-border">
     <div class="s-label">CLI</div>
@@ -637,7 +850,7 @@
       <div class="cli-cmds">
         <div class="cli-cmd">
           <h3>Create a wallet</h3>
-          <p>Fresh Zcash keys, ready in seconds. Named wallets for multi-identity.</p>
+          <p>Fresh Zcash keys, ready in seconds.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet create</span></div>
         </div>
         <div class="cli-cmd">
@@ -681,15 +894,15 @@
   </section>
 </div>
 
-<!-- ══ FOOTER ══ -->
+<!-- FOOTER -->
 <footer>
   <div class="w">
     <div class="foot-inner">
       <div class="foot-l"><em>zimppy</em> &mdash; private machine payments on Zcash</div>
       <ul class="foot-links">
-        <li><a href="https://github.com/betterclever/zimppy">GitHub</a></li>
-        <li><a href="https://www.npmjs.com/package/zimppy">npm</a></li>
-        <li><a href="https://crates.io/crates/zimppy-core">crates.io</a></li>
+        <li><a href="https://github.com/AgitoReiworworking/zimppy">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/zimppy-ts">npm</a></li>
+        <li><a href="https://crates.io/crates/zimppy-rs">crates.io</a></li>
         <li><a href="https://mpp.dev">MPP Spec</a></li>
       </ul>
     </div>
@@ -697,6 +910,15 @@
 </footer>
 
 <script>
+// Tab switching
+function switchTab(btn, panelId) {
+  const card = btn.closest('.int-card');
+  card.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  card.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(panelId).classList.add('active');
+}
+
 // Verification flow stepper
 let currentStep = 0;
 const totalSteps = 6;
@@ -776,9 +998,7 @@ async function runDemo() {
     div.className = 'term-line';
 
     if (line.type) {
-      // Typewriter effect for command
       const parts = line.text.split(/(\x1b\[[^\]]+\])/);
-      let plainText = '';
       let spans = [];
       let currentClass = '';
 
@@ -811,14 +1031,12 @@ async function runDemo() {
     body.scrollTop = body.scrollHeight;
   }
 
-  // Loop
   await sleep(4000);
   runDemo();
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Start on visible
 const observer = new IntersectionObserver((entries) => {
   if (entries[0].isIntersecting) {
     observer.disconnect();
