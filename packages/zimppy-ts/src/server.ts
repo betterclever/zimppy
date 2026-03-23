@@ -36,6 +36,8 @@ import type { ZcashSessionServerOptions } from './session.js'
 export interface ZcashOptions {
   /** Wallet name in ~/.zimppy/wallets/. Uses active wallet if omitted. */
   wallet?: string
+  /** Override: network (auto-detected from wallet if omitted) */
+  network?: 'testnet' | 'mainnet'
   /** Override: Orchard Incoming Viewing Key (skips wallet resolution) */
   orchardIvk?: string
   /** Override: Zebrad RPC endpoint */

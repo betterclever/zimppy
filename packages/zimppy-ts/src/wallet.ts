@@ -71,16 +71,19 @@ export async function resolveWallet(name?: string): Promise<ResolvedWallet> {
     null,
   )
 
-  const [address, orchardIvk] = await Promise.all([
+  const [address, orchardIvk, walletNetwork] = await Promise.all([
     wallet.address(),
     wallet.orchardIvk(),
+    Promise.resolve(wallet.network() as string),
   ])
+
+  const network = (walletNetwork === 'mainnet' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet'
 
   return {
     dataDir,
     lwdServer: config.lwdServer,
     rpcEndpoint: config.rpcEndpoint,
-    network: config.network,
+    network,
     address,
     orchardIvk,
   }
