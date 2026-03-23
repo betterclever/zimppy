@@ -177,7 +177,7 @@ impl ZimppyWalletNapi {
         Ok(status.is_synced)
     }
 
-    /// Get the wallet's unified address.
+    /// Get the wallet's default unified address.
     #[napi]
     pub async fn address(&self) -> napi::Result<String> {
         let wallet = self.wallet.lock().await;
@@ -230,6 +230,16 @@ impl ZimppyWalletNapi {
     pub async fn seed_phrase(&self) -> Option<String> {
         let wallet = self.wallet.lock().await;
         wallet.seed_phrase().await
+    }
+
+    /// Rescan the blockchain from birthday, rebuilding shard tree checkpoints.
+    #[napi]
+    pub async fn rescan(&self) -> napi::Result<()> {
+        let mut wallet = self.wallet.lock().await;
+        wallet
+            .rescan()
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     /// Get the Orchard Incoming Viewing Key (IVK) as a hex string.

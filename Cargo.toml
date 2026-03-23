@@ -12,3 +12,9 @@ repository = "https://github.com/betterclever/zimppy"
 dbg_macro = "deny"
 todo = "deny"
 unwrap_used = "deny"
+
+# Patch zingolib to fix Sapling checkpoint required for Orchard-only spends
+# See: https://github.com/zingolabs/zingolib/issues/2267
+[patch."https://github.com/zingolabs/zingolib.git"]
+zingolib = { path = "/tmp/zingolib-patched/zingolib" }
+pepper-sync = { path = "/tmp/zingolib-patched/pepper-sync" }

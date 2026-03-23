@@ -89,7 +89,7 @@ impl ZimppyWallet {
         Ok(SyncStatus { is_synced: true })
     }
 
-    /// Get the wallet's unified address.
+    /// Get the wallet's default unified address (stable, index 0).
     pub async fn address(&self) -> Result<String, WalletError> {
         let addrs = self.client.unified_addresses_json().await;
         addrs.members().next()
@@ -150,6 +150,13 @@ impl ZimppyWallet {
             .map_err(|e| WalletError::Send(format!("{e}")))?;
 
         Ok(txids.head.to_string())
+    }
+
+    /// Rescan the blockchain from birthday, rebuilding shard tree checkpoints.
+    pub async fn rescan(&mut self) -> Result<(), WalletError> {
+        self.client.rescan_and_await().await
+            .map_err(|e| WalletError::Sync(format!("rescan failed: {e}")))?;
+        Ok(())
     }
 
     /// Save wallet state to disk.

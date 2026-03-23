@@ -44,7 +44,7 @@ async fn main() -> Result<(), WalletError> {
         }
 
         "sync" => {
-            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
+            let wallet = open_existing(&data_dir, &lwd, network).await?;
             eprintln!("Syncing...");
             let status = wallet.sync().await?;
             wallet.save().await?;
@@ -77,7 +77,7 @@ async fn main() -> Result<(), WalletError> {
                 .ok_or(WalletError::Send("invalid amount".to_string()))?;
             let memo = args.get(4).map(|s| s.as_str());
 
-            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
+            let wallet = open_existing(&data_dir, &lwd, network).await?;
             eprintln!("Sending {} zat to {}...", amount, to);
             let txid = wallet.send(to, amount, memo).await?;
             println!("Sent: {txid}");

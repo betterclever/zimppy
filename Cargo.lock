@@ -8415,7 +8415,6 @@ dependencies = [
 [[package]]
 name = "zingo-price"
 version = "0.0.1"
-source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.0#8a663aa646aa2811f4dbe1ea4a89373a28ee6239"
 dependencies = [
  "byteorder",
  "reqwest",
@@ -8450,7 +8449,6 @@ dependencies = [
 [[package]]
 name = "zingolib"
 version = "3.0.0"
-source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.0#8a663aa646aa2811f4dbe1ea4a89373a28ee6239"
 dependencies = [
  "append-only-vec",
  "bech32 0.11.1",
@@ -8569,3 +8567,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "pepper-sync"
+version = "0.2.0"

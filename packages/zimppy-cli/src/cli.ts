@@ -423,11 +423,13 @@ async function sendViaWallet(cfg: ZimppyConfig, params: { to: string; amountZat:
 
   const wallet = await openWallet(cfg)
   process.stderr.write('  Syncing wallet...')
-  // Sync until fully caught up — zingolib shard tree needs multiple passes
-  // after recent transactions to update Sapling and Orchard note trees
-  let synced = false
-  for (let i = 0; i < 10 && !synced; i++) {
-    synced = await wallet.sync()
+  // Sync multiple rounds — zingolib shard tree needs multiple passes
+  // after recent transactions. sync() returning true means chain tip
+  // is reached but shard tree checkpoints may still be stale.
+  // Force at least 5 rounds to ensure both Orchard and Sapling trees
+  // have all checkpoints needed for the current chain tip.
+  for (let i = 0; i < 5; i++) {
+    await wallet.sync()
   }
   console.error(' done')
 
