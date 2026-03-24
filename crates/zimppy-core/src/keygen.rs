@@ -4,7 +4,7 @@
 
 #[cfg(feature = "keygen")]
 fn main() {
-    use zcash_keys::keys::{UnifiedSpendingKey, UnifiedAddressRequest, ReceiverRequirement};
+    use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest, UnifiedSpendingKey};
     use zcash_protocol::consensus::Network;
     use zip32::{AccountId, Scope};
 

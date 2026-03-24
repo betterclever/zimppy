@@ -13,8 +13,9 @@ use mpp::parse_authorization;
 use mpp::protocol::core::{Base64UrlJson, PaymentChallenge};
 use mpp::protocol::intents::{ChargeRequest, SessionRequest};
 use mpp::server::Mpp;
-use zimppy_rs::{ZcashChargeMethod, ZcashSessionMethod};
 use zimppy_rs::session::RefundConfig;
+use zimppy_rs::{ZcashChargeMethod, ZcashSessionMethod};
+use zimppy_wallet::ZimppyWallet;
 
 const PROBLEM_JSON: &str = "application/problem+json";
 
@@ -63,7 +64,11 @@ async fn main() {
 
     eprintln!("=== zimppy MPP server ===");
     eprintln!("  network: {}", config.network);
-    eprintln!("  address: {}...{}", &config.address[..20], &config.address[config.address.len()-8..]);
+    eprintln!(
+        "  address: {}...{}",
+        &config.address[..20],
+        &config.address[config.address.len() - 8..]
+    );
     eprintln!("  IVK: (loaded, {} bytes)", config.orchard_ivk.len());
     eprintln!("  price: {} zat per request", price);
     eprintln!("  RPC: {rpc_endpoint}");
@@ -78,17 +83,26 @@ async fn main() {
         .unwrap_or_else(|_| "https://testnet.zec.rocks".to_string());
     let seed_phrase = std::env::var("ZIMPPY_SEED_PHRASE").ok();
 
-    let session = ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
-        .with_refund_config(RefundConfig {
-            data_dir: std::path::PathBuf::from(&wallet_dir),
-            lwd_endpoint,
-            network: zcash_protocol::consensus::NetworkType::Test,
-            seed_phrase,
-            birthday_height: None,
-        });
+    let refund_config = RefundConfig {
+        data_dir: std::path::PathBuf::from(&wallet_dir),
+        lwd_endpoint,
+        network: zcash_protocol::consensus::NetworkType::Test,
+        seed_phrase,
+        birthday_height: None,
+    };
 
-    let mpp = Mpp::new(charge, "zimppy", &secret_key)
-        .with_session_method(session.clone());
+    let session = match ZimppyWallet::open(refund_config.clone()).await {
+        Ok(refund_wallet) => ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
+            .with_refund_config(refund_config)
+            .with_refund_wallet(refund_wallet),
+        Err(e) => {
+            eprintln!("  WARNING: refund wallet unavailable at startup: {e}");
+            ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
+                .with_refund_config(refund_config)
+        }
+    };
+
+    let mpp = Mpp::new(charge, "zimppy", &secret_key).with_session_method(session.clone());
 
     let state = Arc::new(AppState {
         mpp,
@@ -128,7 +142,7 @@ async fn main() {
 async fn discovery(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(serde_json::json!({
         "methods": ["zcash"],
-        "intents": ["charge", "session"],
+        "intents": ["charge", "session", "stream"],
         "network": state.config.network,
         "recipient": state.config.address,
         "defaultAmount": state.amount_zat.to_string(),
@@ -143,10 +157,7 @@ async fn health() -> impl IntoResponse {
 
 // ── Charge endpoint ─────────────────────────────────────────────
 
-async fn fortune(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn fortune(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if let Some(credential) = parse_credential(&headers) {
         match state.mpp.verify_credential(&credential).await {
             Ok(receipt) => {
@@ -160,7 +171,8 @@ async fn fortune(
                         ("cache-control", "private".to_string()),
                     ],
                     Json(serde_json::json!({ "fortune": fortune })),
-                ).into_response();
+                )
+                    .into_response();
             }
             Err(e) => {
                 eprintln!("[VERIFY] Error: {e}");
@@ -233,7 +245,8 @@ async fn session_fortune(
                             ("cache-control", "private".to_string()),
                         ],
                         Json(mgmt),
-                    ).into_response();
+                    )
+                        .into_response();
                 }
 
                 // Content response (bearer)
@@ -246,7 +259,8 @@ async fn session_fortune(
                         ("cache-control", "private".to_string()),
                     ],
                     Json(serde_json::json!({ "fortune": fortune })),
-                ).into_response();
+                )
+                    .into_response();
             }
             Err(e) => {
                 eprintln!("[SESSION] Error: {e}");
@@ -332,7 +346,8 @@ async fn stream_fortune(
                 ("cache-control", "private".to_string()),
             ],
             Json(result.management_response.unwrap()),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let session_id = result.receipt.reference.clone();
@@ -348,10 +363,13 @@ async fn stream_fortune(
     let fortune = fortunes[std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .subsec_nanos() as usize % fortunes.len()];
+        .subsec_nanos() as usize
+        % fortunes.len()];
 
     let words: Vec<String> = fortune.split_whitespace().map(String::from).collect();
     let tick_cost: u64 = 1000; // 1000 zat per word
+    let top_up_timeout = std::time::Duration::from_secs(300);
+    let poll_interval = std::time::Duration::from_secs(1);
 
     let stream = async_stream::stream! {
         let mut total_spent: u64 = 0;
@@ -384,7 +402,35 @@ async fn stream_fortune(
                     yield Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default()
                         .event("payment-need-topup")
                         .data(need.to_string()));
-                    break;
+
+                    let deadline = std::time::Instant::now() + top_up_timeout;
+                    let mut funded = false;
+
+                    while std::time::Instant::now() < deadline {
+                        tokio::time::sleep(poll_interval).await;
+                        match state.session.deduct(&session_id, tick_cost) {
+                            Ok(remaining) => {
+                                total_spent += tick_cost;
+                                total_chunks += 1;
+                                let data = serde_json::json!({ "token": word, "remaining": remaining });
+                                eprintln!("[STREAM] top-up received, resuming with token=\"{word}\" remaining={remaining}");
+                                yield Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default()
+                                    .event("message")
+                                    .data(data.to_string()));
+                                funded = true;
+                                break;
+                            }
+                            Err(_) => (),
+                        }
+                    }
+
+                    if !funded {
+                        eprintln!("[STREAM] top-up timed out");
+                        yield Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default()
+                            .event("error")
+                            .data(serde_json::json!({ "error": "topUp timeout" }).to_string()));
+                        break;
+                    }
                 }
             }
         }
@@ -446,14 +492,20 @@ fn build_challenge<T: serde::Serialize>(
 // ── Helpers ─────────────────────────────────────────────────────
 
 fn parse_credential(headers: &HeaderMap) -> Option<mpp::PaymentCredential> {
-    headers.get(header::AUTHORIZATION)
+    headers
+        .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| parse_authorization(s).ok())
 }
 
 /// RFC 9457 problem details response helper
 #[allow(dead_code)]
-fn problem_response(status: u16, title: &str, detail: &str, problem_type: &str) -> axum::response::Response {
+fn problem_response(
+    status: u16,
+    title: &str,
+    detail: &str,
+    problem_type: &str,
+) -> axum::response::Response {
     let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     (
         code,

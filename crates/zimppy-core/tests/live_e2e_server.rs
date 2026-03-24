@@ -1,8 +1,8 @@
 #![cfg(feature = "shielded")]
 
+use zimppy_core::replay::ConsumedTxids;
 use zimppy_core::rpc::ZebradRpc;
 use zimppy_core::shielded::{verify_shielded, ShieldedVerifyRequest};
-use zimppy_core::replay::ConsumedTxids;
 
 // Real tx sent from client wallet to server wallet
 const E2E_TXID: &str = "764f92e359c72f45457fdb1fa4b204108aef60a9c18253dd9bf604a3d12eff80";
@@ -22,12 +22,17 @@ async fn e2e_server_verifies_client_payment() {
     println!("  expected amount: 42000 zat");
     println!();
 
-    let result = verify_shielded(&rpc, &ShieldedVerifyRequest {
-        txid: E2E_TXID.to_string(),
-        ivk_bytes_hex: SERVER_IVK.to_string(),
-        expected_challenge_id: "challenge-e2e-test-001".to_string(),
-        expected_amount_zat: 42000,
-    }, &consumed).await;
+    let result = verify_shielded(
+        &rpc,
+        &ShieldedVerifyRequest {
+            txid: E2E_TXID.to_string(),
+            ivk_bytes_hex: SERVER_IVK.to_string(),
+            expected_challenge_id: "challenge-e2e-test-001".to_string(),
+            expected_amount_zat: 42000,
+        },
+        &consumed,
+    )
+    .await;
 
     match &result {
         Ok(r) => {

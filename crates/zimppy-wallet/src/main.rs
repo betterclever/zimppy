@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use zimppy_wallet::{WalletConfig, WalletError, ZimppyWallet};
 use zcash_protocol::consensus::NetworkType;
+use zimppy_wallet::{WalletConfig, WalletError, ZimppyWallet};
 
 #[tokio::main]
 async fn main() -> Result<(), WalletError> {
@@ -12,7 +12,12 @@ async fn main() -> Result<(), WalletError> {
 
     let data_dir = std::env::var("ZIMPPY_WALLET_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".zimppy").join("wallet"));
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(".zimppy")
+                .join("wallet")
+        });
 
     let lwd = std::env::var("ZIMPPY_LWD_ENDPOINT")
         .unwrap_or_else(|_| "https://testnet.zec.rocks".to_string());
@@ -24,35 +29,36 @@ async fn main() -> Result<(), WalletError> {
 
     match cmd {
         "init" => {
-            let phrase = args.get(2)
-                .ok_or(WalletError::InvalidSeed("usage: zimppy-wallet init \"seed phrase words...\"".to_string()))?;
+            let phrase = args.get(2).ok_or(WalletError::InvalidSeed(
+                "usage: zimppy-wallet init \"seed phrase words...\"".to_string(),
+            ))?;
 
             let birthday: Option<u32> = args.get(3).and_then(|s| s.parse().ok());
 
-            let wallet = ZimppyWallet::open(WalletConfig {
+            let wallet = ZimppyWallet::create(WalletConfig {
                 data_dir: data_dir.clone(),
                 lwd_endpoint: lwd,
                 network,
                 seed_phrase: Some(phrase.clone()),
                 birthday_height: birthday,
-            }).await?;
-
-            wallet.save().await?;
+            })
+            .await?;
             eprintln!("Wallet created at {}", data_dir.display());
             let addr = wallet.address().await?;
             println!("Address: {addr}");
         }
 
         "sync" => {
-            let wallet = open_existing(&data_dir, &lwd, network).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
             eprintln!("Syncing...");
             let status = wallet.sync().await?;
-            wallet.save().await?;
             eprintln!("Synced: {}", status.is_synced);
 
             let bal = wallet.balance().await?;
-            println!("Balance: {} zat (spendable: {}, pending: {})",
-                bal.total_zat, bal.spendable_zat, bal.pending_zat);
+            println!(
+                "Balance: {} zat (spendable: {}, pending: {})",
+                bal.total_zat, bal.spendable_zat, bal.pending_zat
+            );
         }
 
         "address" => {
@@ -70,14 +76,18 @@ async fn main() -> Result<(), WalletError> {
         }
 
         "send" => {
-            let to = args.get(2)
-                .ok_or(WalletError::Send("usage: zimppy-wallet send <address> <amount_zat> [memo]".to_string()))?;
-            let amount: u64 = args.get(3)
+            let to = args.get(2).ok_or(WalletError::Send(
+                "usage: zimppy-wallet send <address> <amount_zat> [memo]".to_string(),
+            ))?;
+            let amount: u64 = args
+                .get(3)
                 .and_then(|s| s.parse().ok())
                 .ok_or(WalletError::Send("invalid amount".to_string()))?;
             let memo = args.get(4).map(|s| s.as_str());
 
-            let wallet = open_existing(&data_dir, &lwd, network).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
+            eprintln!("Syncing before send...");
+            wallet.sync().await?;
             eprintln!("Sending {} zat to {}...", amount, to);
             let txid = wallet.send(to, amount, memo).await?;
             println!("Sent: {txid}");
@@ -95,7 +105,9 @@ async fn main() -> Result<(), WalletError> {
             eprintln!();
             eprintln!("Environment:");
             eprintln!("  ZIMPPY_WALLET_DIR    Data directory (default: ~/.zimppy/wallet)");
-            eprintln!("  ZIMPPY_LWD_ENDPOINT  Lightwalletd URL (default: https://testnet.zec.rocks)");
+            eprintln!(
+                "  ZIMPPY_LWD_ENDPOINT  Lightwalletd URL (default: https://testnet.zec.rocks)"
+            );
             eprintln!("  ZIMPPY_NETWORK       mainnet or testnet (default: testnet)");
         }
     }
@@ -103,12 +115,17 @@ async fn main() -> Result<(), WalletError> {
     Ok(())
 }
 
-async fn open_existing(data_dir: &PathBuf, lwd: &str, network: NetworkType) -> Result<ZimppyWallet, WalletError> {
+async fn open_existing(
+    data_dir: &PathBuf,
+    lwd: &str,
+    network: NetworkType,
+) -> Result<ZimppyWallet, WalletError> {
     ZimppyWallet::open(WalletConfig {
         data_dir: data_dir.clone(),
         lwd_endpoint: lwd.to_string(),
         network,
         seed_phrase: None,
         birthday_height: None,
-    }).await
+    })
+    .await
 }

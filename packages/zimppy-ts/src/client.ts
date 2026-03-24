@@ -64,10 +64,7 @@ export function zcash(options: ZcashOptions = {}): ReturnType<typeof zcashClient
     createPayment: async ({ challenge, challengeId }) => {
       const { wallet } = await openWallet(walletName)
 
-      // Sync wallet before sending
-      for (let i = 0; i < 10; i++) {
-        if (await wallet.sync()) break
-      }
+      await wallet.ensureReady()
 
       // Build memo from challenge template
       const memo = challenge.methodDetails?.memo
@@ -79,10 +76,7 @@ export function zcash(options: ZcashOptions = {}): ReturnType<typeof zcashClient
         memo,
       )
 
-      // Post-send sync for shard tree
-      for (let i = 0; i < 5; i++) {
-        if (await wallet.sync()) break
-      }
+      await wallet.ensureReady()
 
       return { txid }
     },
@@ -135,15 +129,11 @@ zcash.session = function session(options: ZcashSessionOptions = {}) {
     sendPayment: async ({ to, amountZat, memo }) => {
       const wallet = await getWallet()
 
-      for (let i = 0; i < 10; i++) {
-        if (await wallet.sync()) break
-      }
+      await wallet.ensureReady()
 
       const txid = await wallet.send(to, amountZat, memo)
 
-      for (let i = 0; i < 5; i++) {
-        if (await wallet.sync()) break
-      }
+      await wallet.ensureReady()
 
       return txid
     },

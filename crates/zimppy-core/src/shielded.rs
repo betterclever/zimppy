@@ -68,8 +68,9 @@ pub async fn verify_shielded(
         hex::decode(&raw_hex).map_err(|e| ShieldedVerifyError::ParseError(e.to_string()))?;
 
     // Parse transaction (Nu5 for Orchard support)
-    let tx = Transaction::read(&raw_bytes[..], BranchId::Nu5)
-        .map_err(|e| ShieldedVerifyError::ParseError(format!("failed to parse transaction: {e}")))?;
+    let tx = Transaction::read(&raw_bytes[..], BranchId::Nu5).map_err(|e| {
+        ShieldedVerifyError::ParseError(format!("failed to parse transaction: {e}"))
+    })?;
 
     // Parse the IVK
     let ivk_bytes = hex::decode(&req.ivk_bytes_hex)
@@ -81,16 +82,18 @@ pub async fn verify_shielded(
 
     let ivk = IncomingViewingKey::from_bytes(&ivk_array)
         .into_option()
-        .ok_or_else(|| ShieldedVerifyError::InvalidKey(
-            "bytes do not represent a valid Orchard incoming viewing key".to_string(),
-        ))?;
+        .ok_or_else(|| {
+            ShieldedVerifyError::InvalidKey(
+                "bytes do not represent a valid Orchard incoming viewing key".to_string(),
+            )
+        })?;
 
     // Get Orchard bundle
-    let orchard_bundle = tx
-        .orchard_bundle()
-        .ok_or_else(|| ShieldedVerifyError::NoOrchardActions {
-            txid: req.txid.clone(),
-        })?;
+    let orchard_bundle =
+        tx.orchard_bundle()
+            .ok_or_else(|| ShieldedVerifyError::NoOrchardActions {
+                txid: req.txid.clone(),
+            })?;
 
     let action_count = orchard_bundle.actions().len();
     if action_count == 0 {
@@ -105,9 +108,7 @@ pub async fn verify_shielded(
 
     // Try to decrypt each Orchard action
     for idx in 0..action_count {
-        if let Some((note, _address, memo)) =
-            orchard_bundle.decrypt_output_with_key(idx, &ivk)
-        {
+        if let Some((note, _address, memo)) = orchard_bundle.decrypt_output_with_key(idx, &ivk) {
             outputs_decrypted += 1;
             let value = note.value().inner();
 

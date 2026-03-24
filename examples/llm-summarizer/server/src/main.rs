@@ -11,9 +11,10 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 
-use zimppy_rs::ZcashChargeMethod;
 use zimppy_rs::session::RefundConfig;
+use zimppy_rs::ZcashChargeMethod;
 use zimppy_rs::ZcashSessionMethod;
+use zimppy_wallet::ZimppyWallet;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -44,8 +45,8 @@ struct AppState {
 
 fn generate_challenge_id(secret: &str, fields: &[&str]) -> String {
     let payload = fields.join("|");
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(payload.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
@@ -54,15 +55,26 @@ fn generate_challenge_id(secret: &str, fields: &[&str]) -> String {
 async fn main() {
     let rpc_endpoint = std::env::var("ZEBRAD_RPC_ENDPOINT")
         .unwrap_or_else(|_| "https://zcash-testnet-zebrad.gateway.tatum.io".to_string());
-    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3181);
-    let price: u64 = std::env::var("PRICE_ZAT").ok().and_then(|p| p.parse().ok()).unwrap_or(10_000);
-    let stream_tick_cost: u64 = std::env::var("STREAM_TICK_COST_ZAT").ok().and_then(|p| p.parse().ok()).unwrap_or(1_000);
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3181);
+    let price: u64 = std::env::var("PRICE_ZAT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(10_000);
+    let stream_tick_cost: u64 = std::env::var("STREAM_TICK_COST_ZAT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(1_000);
     let secret_key = std::env::var("MPP_SECRET_KEY").unwrap_or_else(|_| {
         eprintln!("  WARNING: MPP_SECRET_KEY not set, using default (insecure for production)");
         "zimppy-ai-secret".to_string()
     });
-    let vibeproxy_url = std::env::var("VIBEPROXY_URL").unwrap_or_else(|_| "http://localhost:8317".to_string());
-    let vibeproxy_model = std::env::var("VIBEPROXY_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
+    let vibeproxy_url =
+        std::env::var("VIBEPROXY_URL").unwrap_or_else(|_| "http://localhost:8317".to_string());
+    let vibeproxy_model =
+        std::env::var("VIBEPROXY_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
 
     let config_path = std::env::var("SERVER_WALLET_CONFIG")
         .unwrap_or_else(|_| "config/server-wallet.json".to_string());
@@ -73,7 +85,11 @@ async fn main() {
 
     eprintln!("=== zimppy AI server ===");
     eprintln!("  network: {}", config.network);
-    eprintln!("  address: {}...{}", &config.address[..20], &config.address[config.address.len()-8..]);
+    eprintln!(
+        "  address: {}...{}",
+        &config.address[..20],
+        &config.address[config.address.len() - 8..]
+    );
     eprintln!("  price: {} zat per summarization", price);
     eprintln!("  AI backend: {vibeproxy_url} (model: {vibeproxy_model})");
     eprintln!("  port: {port}");
@@ -86,14 +102,24 @@ async fn main() {
         .unwrap_or_else(|_| "https://testnet.zec.rocks".to_string());
     let seed_phrase = std::env::var("ZIMPPY_SEED_PHRASE").ok();
 
-    let session = ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
-        .with_refund_config(RefundConfig {
-            data_dir: std::path::PathBuf::from(&wallet_dir),
-            lwd_endpoint,
-            network: zcash_protocol::consensus::NetworkType::Test,
-            seed_phrase,
-            birthday_height: None,
-        });
+    let refund_config = RefundConfig {
+        data_dir: std::path::PathBuf::from(&wallet_dir),
+        lwd_endpoint,
+        network: zcash_protocol::consensus::NetworkType::Test,
+        seed_phrase,
+        birthday_height: None,
+    };
+
+    let session = match ZimppyWallet::open(refund_config.clone()).await {
+        Ok(refund_wallet) => ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
+            .with_refund_config(refund_config)
+            .with_refund_wallet(refund_wallet),
+        Err(e) => {
+            eprintln!("  WARNING: refund wallet unavailable at startup: {e}");
+            ZcashSessionMethod::new(&rpc_endpoint, &config.orchard_ivk)
+                .with_refund_config(refund_config)
+        }
+    };
 
     let state = Arc::new(AppState {
         payment,
@@ -118,8 +144,14 @@ async fn main() {
 
     eprintln!("  endpoints:");
     eprintln!("    POST /api/summarize           (charge, {} zat)", price);
-    eprintln!("    POST /api/session/summarize    (session, {} zat/req)", price);
-    eprintln!("    POST /api/stream/summarize     (stream, {} zat/token)", stream_tick_cost);
+    eprintln!(
+        "    POST /api/session/summarize    (session, {} zat/req)",
+        price
+    );
+    eprintln!(
+        "    POST /api/stream/summarize     (stream, {} zat/token)",
+        stream_tick_cost
+    );
     eprintln!("  listening on http://0.0.0.0:{port}");
     eprintln!("  discovery: http://0.0.0.0:{port}/.well-known/payment");
     eprintln!();
@@ -128,7 +160,9 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("failed to bind: {e}"));
 
-    axum::serve(listener, app).await.unwrap_or_else(|e| panic!("server error: {e}"));
+    axum::serve(listener, app)
+        .await
+        .unwrap_or_else(|e| panic!("server error: {e}"));
 }
 
 // ── AI backend ────────────────────────────────────────────────────────
@@ -147,7 +181,9 @@ async fn call_ai(state: &AppState, text: &str) -> Result<String, String> {
 
     eprintln!("[AI] Calling VibeProxy ({})...", state.vibeproxy_model);
 
-    let resp = state.http_client.post(&url)
+    let resp = state
+        .http_client
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("Authorization", "Bearer dummy-not-used")
         .json(&body)
@@ -156,7 +192,9 @@ async fn call_ai(state: &AppState, text: &str) -> Result<String, String> {
         .map_err(|e| format!("AI request failed: {e}"))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| format!("AI response parse failed: {e}"))?;
 
     if !status.is_success() {
@@ -258,7 +296,11 @@ async fn handle_charge_payment(
         Ok(v) => v,
         Err(e) => {
             eprintln!("[AUTH] ERROR: {e}");
-            return problem_response(400, "Invalid Credential", &format!("invalid credential: {e}"));
+            return problem_response(
+                400,
+                "Invalid Credential",
+                &format!("invalid credential: {e}"),
+            );
         }
     };
 
@@ -268,16 +310,24 @@ async fn handle_charge_payment(
     let amount_zat = match state.challenges.lock() {
         Ok(challenges) => match challenges.get(&challenge_id) {
             Some(&(amount, _)) => amount,
-            None => return problem_response(400, "Unknown Challenge", "challenge_id not recognized"),
+            None => {
+                return problem_response(400, "Unknown Challenge", "challenge_id not recognized")
+            }
         },
         Err(_) => return problem_response(500, "Internal Error", "lock error"),
     };
 
     eprintln!("[VERIFY] Verifying shielded payment...");
-    match state.payment.verify_payment(&txid, &challenge_id, amount_zat).await {
+    match state
+        .payment
+        .verify_payment(&txid, &challenge_id, amount_zat)
+        .await
+    {
         Ok(outcome) => {
-            eprintln!("[VERIFY] verified={} amount={} memo_matched={}",
-                outcome.verified, outcome.observed_amount_zat, outcome.memo_matched);
+            eprintln!(
+                "[VERIFY] verified={} amount={} memo_matched={}",
+                outcome.verified, outcome.observed_amount_zat, outcome.memo_matched
+            );
 
             if !outcome.verified {
                 return problem_response(402, "Payment Not Verified", "amount or memo mismatch");
@@ -289,7 +339,13 @@ async fn handle_charge_payment(
 
             let text = match &body {
                 Some(b) => &b.text,
-                None => return problem_response(400, "Missing Body", "POST body with {\"text\": \"...\"} required"),
+                None => {
+                    return problem_response(
+                        400,
+                        "Missing Body",
+                        "POST body with {\"text\": \"...\"} required",
+                    )
+                }
             };
 
             let summary = match call_ai(&state, text).await {
@@ -306,7 +362,8 @@ async fn handle_charge_payment(
                 "reference": outcome.txid,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
-            let encoded_receipt = base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
+            let encoded_receipt =
+                base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
 
             eprintln!("[200] Payment verified, summary served");
 
@@ -314,7 +371,8 @@ async fn handle_charge_payment(
                 StatusCode::OK,
                 [("payment-receipt", encoded_receipt)],
                 Json(serde_json::json!({ "summary": summary })),
-            ).into_response()
+            )
+                .into_response()
         }
         Err(e) => {
             eprintln!("[VERIFY] ERROR: {e}");
@@ -354,20 +412,31 @@ async fn handle_session_payment(
     };
     let value: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
-        Err(e) => return problem_response(400, "Invalid Credential", &format!("invalid JSON: {e}")),
+        Err(e) => {
+            return problem_response(400, "Invalid Credential", &format!("invalid JSON: {e}"))
+        }
     };
     let payload = match value.get("payload") {
         Some(p) => p.clone(),
         None => return problem_response(400, "Invalid Credential", "missing payload"),
     };
 
-    let action = payload.get("action").and_then(|a| a.as_str()).unwrap_or("unknown");
+    let action = payload
+        .get("action")
+        .and_then(|a| a.as_str())
+        .unwrap_or("unknown");
     eprintln!("[SESSION] Action: {action}");
 
-    match state.session.verify_session_payload(&payload, state.amount_zat).await {
+    match state
+        .session
+        .verify_session_payload(&payload, state.amount_zat, state.amount_zat * 10)
+        .await
+    {
         Ok(result) => {
-            eprintln!("[SESSION] session_id={}, action={}, management={}",
-                result.session_id, result.action, result.is_management);
+            eprintln!(
+                "[SESSION] session_id={}, action={}, management={}",
+                result.session_id, result.action, result.is_management
+            );
 
             let receipt = serde_json::json!({
                 "status": "success",
@@ -376,7 +445,8 @@ async fn handle_session_payment(
                 "action": result.action,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
-            let encoded_receipt = base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
+            let encoded_receipt =
+                base64url_encode(&serde_json::to_vec(&receipt).unwrap_or_default());
 
             if result.is_management {
                 (
@@ -389,12 +459,19 @@ async fn handle_session_payment(
                         "refundTxid": result.refund_txid,
                         "refundAmountZat": result.refund_amount_zat,
                     })),
-                ).into_response()
+                )
+                    .into_response()
             } else {
                 // Bearer — do the actual summarization
                 let text = match &body {
                     Some(b) => &b.text,
-                    None => return problem_response(400, "Missing Body", "POST body with {\"text\": \"...\"} required"),
+                    None => {
+                        return problem_response(
+                            400,
+                            "Missing Body",
+                            "POST body with {\"text\": \"...\"} required",
+                        )
+                    }
                 };
 
                 let summary = match call_ai(&state, text).await {
@@ -411,7 +488,8 @@ async fn handle_session_payment(
                     StatusCode::OK,
                     [("payment-receipt", encoded_receipt)],
                     Json(serde_json::json!({ "summary": summary })),
-                ).into_response()
+                )
+                    .into_response()
             }
         }
         Err(e) => {
@@ -428,7 +506,10 @@ async fn stream_summarize(
     headers: HeaderMap,
     body: Option<Json<SummarizeRequest>>,
 ) -> impl IntoResponse {
-    let auth = match headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+    let auth = match headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+    {
         Some(a) if a.starts_with("Payment ") => a,
         _ => return issue_challenge(state).await,
     };
@@ -440,7 +521,9 @@ async fn stream_summarize(
     };
     let value: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
-        Err(e) => return problem_response(400, "Invalid Credential", &format!("invalid JSON: {e}")),
+        Err(e) => {
+            return problem_response(400, "Invalid Credential", &format!("invalid JSON: {e}"))
+        }
     };
     let payload = match value.get("payload") {
         Some(p) => p.clone(),
@@ -452,7 +535,11 @@ async fn stream_summarize(
         return problem_response(400, "Invalid Action", "stream requires bearer action");
     }
 
-    let session_id = payload.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let session_id = payload
+        .get("sessionId")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
     let bearer = payload.get("bearer").and_then(|b| b.as_str()).unwrap_or("");
 
     // Verify bearer
@@ -473,7 +560,13 @@ async fn stream_summarize(
 
     let text = match &body {
         Some(b) => b.text.clone(),
-        None => return problem_response(400, "Missing Body", "POST body with {\"text\": \"...\"} required"),
+        None => {
+            return problem_response(
+                400,
+                "Missing Body",
+                "POST body with {\"text\": \"...\"} required",
+            )
+        }
     };
 
     eprintln!("[STREAM] Starting AI stream for session {session_id}");
@@ -549,12 +642,24 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
     let now_str = now.to_string();
     let challenge_id = generate_challenge_id(
         &state.secret_key,
-        &["zimppy-ai", "zcash", "charge", &amount_str, "ZEC", &state.config.address, &now_str],
+        &[
+            "zimppy-ai",
+            "zcash",
+            "charge",
+            &amount_str,
+            "ZEC",
+            &state.config.address,
+            &now_str,
+        ],
     );
 
     let memo_template = format!("zimppy:{challenge_id}");
 
-    eprintln!("[402] Issuing challenge: {} zat, memo={}", state.amount_zat, &memo_template[..40.min(memo_template.len())]);
+    eprintln!(
+        "[402] Issuing challenge: {} zat, memo={}",
+        state.amount_zat,
+        &memo_template[..40.min(memo_template.len())]
+    );
 
     if let Ok(mut challenges) = state.challenges.lock() {
         challenges.insert(challenge_id.clone(), (state.amount_zat, now));
@@ -569,7 +674,8 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
         "memo": memo_template,
         "expiresAt": now + 600,
     });
-    let encoded_request = base64url_encode(&serde_json::to_vec(&request_payload).unwrap_or_default());
+    let encoded_request =
+        base64url_encode(&serde_json::to_vec(&request_payload).unwrap_or_default());
 
     let www_auth = format!(
         "Payment id=\"{challenge_id}\", realm=\"zimppy-ai\", method=\"zcash\", intent=\"charge\", request=\"{encoded_request}\""
@@ -588,7 +694,8 @@ async fn issue_challenge(state: Arc<AppState>) -> axum::response::Response {
             "detail": format!("Send {} zat to summarize your document", state.amount_zat),
             "challengeId": challenge_id,
         })),
-    ).into_response()
+    )
+        .into_response()
 }
 
 fn problem_response(status: u16, title: &str, detail: &str) -> axum::response::Response {
@@ -609,10 +716,16 @@ fn decode_credential(encoded: &str) -> Result<(String, String), String> {
     let bytes = base64url_decode(encoded).map_err(|_| "invalid base64url".to_string())?;
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("invalid JSON: {e}"))?;
-    let txid = value.pointer("/payload/txid").and_then(|v| v.as_str())
-        .ok_or("missing payload.txid")?.to_string();
-    let challenge_id = value.pointer("/payload/challengeId").and_then(|v| v.as_str())
-        .ok_or("missing payload.challengeId")?.to_string();
+    let txid = value
+        .pointer("/payload/txid")
+        .and_then(|v| v.as_str())
+        .ok_or("missing payload.txid")?
+        .to_string();
+    let challenge_id = value
+        .pointer("/payload/challengeId")
+        .and_then(|v| v.as_str())
+        .ok_or("missing payload.challengeId")?
+        .to_string();
     Ok((txid, challenge_id))
 }
 
@@ -652,8 +765,10 @@ fn base64url_encode(data: &[u8]) -> String {
 fn base64url_decode(input: &str) -> Result<Vec<u8>, ()> {
     let padded = format!("{}{}", input, &"===="[..((4 - input.len() % 4) % 4)]);
     let standard = padded.replace('-', "+").replace('_', "/");
-    let decoded = standard.as_bytes().iter().filter_map(|&b| {
-        match b {
+    let decoded = standard
+        .as_bytes()
+        .iter()
+        .filter_map(|&b| match b {
             b'A'..=b'Z' => Some(b - b'A'),
             b'a'..=b'z' => Some(b - b'a' + 26),
             b'0'..=b'9' => Some(b - b'0' + 52),
@@ -661,8 +776,8 @@ fn base64url_decode(input: &str) -> Result<Vec<u8>, ()> {
             b'/' => Some(63),
             b'=' => None,
             _ => None,
-        }
-    }).collect::<Vec<u8>>();
+        })
+        .collect::<Vec<u8>>();
 
     let mut result = Vec::new();
     let mut i = 0;

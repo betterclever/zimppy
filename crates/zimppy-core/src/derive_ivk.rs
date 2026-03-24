@@ -13,8 +13,8 @@ fn main() {
         .nth(1)
         .expect("usage: zimppy-derive-ivk \"word1 word2 ... word24\"");
 
-    let mnemonic = Mnemonic::<English>::from_phrase(&mnemonic_str)
-        .expect("invalid mnemonic phrase");
+    let mnemonic =
+        Mnemonic::<English>::from_phrase(&mnemonic_str).expect("invalid mnemonic phrase");
 
     let seed = mnemonic.to_seed("");
     let account = AccountId::try_from(0).expect("valid account id");

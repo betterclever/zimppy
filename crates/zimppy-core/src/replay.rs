@@ -42,10 +42,7 @@ impl ConsumedTxids {
     /// Check if a txid has already been consumed. If not, insert it.
     /// Returns `Err(ReplayError)` if the txid was already consumed.
     pub fn check_and_insert(&self, txid: &str) -> Result<(), ReplayError> {
-        let mut set = self
-            .inner
-            .lock()
-            .map_err(|_| ReplayError::LockPoisoned)?;
+        let mut set = self.inner.lock().map_err(|_| ReplayError::LockPoisoned)?;
         if set.contains(txid) {
             return Err(ReplayError::AlreadyConsumed);
         }
@@ -53,7 +50,11 @@ impl ConsumedTxids {
         // Persist to file if configured.
         if let Some(ref path) = self.file_path {
             use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
                 let _ = writeln!(f, "{txid}");
             }
         }
@@ -138,9 +139,7 @@ mod tests {
     #[test]
     fn remove_allows_reinsertion() {
         let consumed = ConsumedTxids::new();
-        consumed
-            .check_and_insert("tx1")
-            .expect("should succeed");
+        consumed.check_and_insert("tx1").expect("should succeed");
         consumed.remove("tx1");
         consumed
             .check_and_insert("tx1")
@@ -151,9 +150,7 @@ mod tests {
     fn clone_shares_state() {
         let consumed = ConsumedTxids::new();
         let clone = consumed.clone();
-        consumed
-            .check_and_insert("tx1")
-            .expect("should succeed");
+        consumed.check_and_insert("tx1").expect("should succeed");
         let err = clone
             .check_and_insert("tx1")
             .expect_err("clone should see same state");
@@ -164,9 +161,7 @@ mod tests {
     fn is_empty_works() {
         let consumed = ConsumedTxids::new();
         assert!(consumed.is_empty());
-        consumed
-            .check_and_insert("tx1")
-            .expect("should succeed");
+        consumed.check_and_insert("tx1").expect("should succeed");
         assert!(!consumed.is_empty());
     }
 }

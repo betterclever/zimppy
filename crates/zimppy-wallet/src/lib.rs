@@ -1,14 +1,19 @@
 mod config;
 mod error;
 
+use std::fs::{self, OpenOptions};
+use std::io::{BufWriter, Write};
 use std::num::NonZeroU32;
+use std::path::{Path, PathBuf};
 
 use bip0039::Mnemonic;
 use zcash_address::ZcashAddress;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::memo::MemoBytes;
 use zcash_protocol::value::Zatoshis;
-use zingolib::data::receivers::{Receiver, transaction_request_from_receivers};
+use zingolib::data::receivers::{transaction_request_from_receivers, Receiver};
+use zingolib::grpc_connector;
+use zingolib::lightclient::error::LightClientError;
 use zingolib::lightclient::LightClient;
 use zingolib::wallet::{LightWallet, WalletBase};
 
@@ -35,80 +40,152 @@ pub struct SyncStatus {
 /// A native Zcash wallet backed by zingolib.
 pub struct ZimppyWallet {
     client: LightClient,
+    save_task_running: bool,
 }
 
 impl ZimppyWallet {
-    /// Open an existing wallet from disk, or create/restore from seed phrase.
+    /// Open an existing wallet from disk.
+    ///
+    /// If the wallet file does not exist, this returns [`WalletError::NotInitialized`]
+    /// unless a seed phrase is provided, in which case the wallet is restored.
     pub async fn open(wallet_config: WalletConfig) -> Result<Self, WalletError> {
-        config::ensure_tls();
-        let zingo_config = config::to_zingo_config(&wallet_config)?;
-
-        // Try loading existing wallet first
-        if wallet_config.data_dir.join("zingo-wallet.dat").exists() && wallet_config.seed_phrase.is_none() {
-            let client = LightClient::create_from_wallet_path(zingo_config)
-                .map_err(|e| WalletError::Client(format!("{e}")))?;
-            return Ok(Self { client });
+        if wallet_path(&wallet_config.data_dir).exists() {
+            return Self::open_existing(wallet_config);
         }
 
-        // Create from seed or fresh entropy
-        let birthday = BlockHeight::from_u32(
-            wallet_config.birthday_height.unwrap_or(3_906_900)
-        );
+        if wallet_config.seed_phrase.is_some() {
+            return Self::create(wallet_config).await;
+        }
 
-        let wallet_base = match wallet_config.seed_phrase {
+        Err(WalletError::NotInitialized)
+    }
+
+    /// Create a new wallet or restore one from seed, then persist it immediately.
+    pub async fn create(wallet_config: WalletConfig) -> Result<Self, WalletError> {
+        config::ensure_tls();
+        let zingo_config = config::to_zingo_config(&wallet_config)?;
+        let wallet_path = wallet_path(&wallet_config.data_dir);
+
+        if wallet_path.exists() {
+            return Err(WalletError::Client(format!(
+                "wallet already exists at {}",
+                wallet_path.display()
+            )));
+        }
+
+        let client = match wallet_config.seed_phrase {
             Some(phrase) => {
+                let birthday_height = wallet_config.birthday_height.ok_or_else(|| {
+                    WalletError::Client("restoring from seed requires birthday_height".to_string())
+                })?;
                 let mnemonic = Mnemonic::from_phrase(phrase)
                     .map_err(|e| WalletError::InvalidSeed(format!("{e}")))?;
-                WalletBase::Mnemonic {
+                let wallet_base = WalletBase::Mnemonic {
                     mnemonic,
                     no_of_accounts: NonZeroU32::new(1).expect("nonzero"),
-                }
+                };
+                LightWallet::new(
+                    zingo_config.chain,
+                    wallet_base,
+                    BlockHeight::from_u32(birthday_height),
+                    zingo_config.wallet_settings.clone(),
+                )
+                .map_err(|e| WalletError::Client(format!("wallet creation failed: {e}")))
+                .and_then(|wallet| {
+                    LightClient::create_from_wallet(wallet, zingo_config, false)
+                        .map_err(|e| WalletError::Client(format!("{e}")))
+                })?
             }
-            None => WalletBase::FreshEntropy {
-                no_of_accounts: NonZeroU32::new(1).expect("nonzero"),
-            },
+            None => {
+                let chain_height =
+                    grpc_connector::get_latest_block(zingo_config.get_lightwalletd_uri())
+                        .await
+                        .map(|block_id| BlockHeight::from_u32(block_id.height as u32))
+                        .map_err(|e| {
+                            WalletError::Client(format!("failed to fetch chain height: {e}"))
+                        })?;
+
+                LightClient::new(zingo_config, chain_height, false)
+                    .map_err(|e| WalletError::Client(format!("{e}")))?
+            }
         };
 
-        let wallet = LightWallet::new(
-            zingo_config.chain,
-            wallet_base,
-            birthday,
-            zingo_config.wallet_settings.clone(),
-        ).map_err(|e| WalletError::Client(format!("wallet creation failed: {e}")))?;
+        let wallet = Self {
+            client,
+            save_task_running: false,
+        };
+        wallet.save().await?;
+        Ok(wallet)
+    }
 
-        let client = LightClient::create_from_wallet(wallet, zingo_config, true)
+    fn open_existing(wallet_config: WalletConfig) -> Result<Self, WalletError> {
+        config::ensure_tls();
+        let zingo_config = config::to_zingo_config(&wallet_config)?;
+        let client = LightClient::create_from_wallet_path(zingo_config)
             .map_err(|e| WalletError::Client(format!("{e}")))?;
-
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            save_task_running: false,
+        })
     }
 
     /// Sync the wallet with the Zcash blockchain via lightwalletd.
     pub async fn sync(&mut self) -> Result<SyncStatus, WalletError> {
-        self.client.sync_and_await().await
-            .map_err(|e| WalletError::Sync(format!("{e}")))?;
+        self.ensure_ready().await?;
         Ok(SyncStatus { is_synced: true })
     }
 
     /// Get the wallet's default unified address (stable, index 0).
     pub async fn address(&self) -> Result<String, WalletError> {
         let addrs = self.client.unified_addresses_json().await;
-        addrs.members().next()
+        addrs
+            .members()
+            .next()
             .and_then(|a| a["encoded_address"].as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| WalletError::Address("no addresses found".to_string()))
     }
 
+    /// Generate a unified address with both Sapling and Orchard receivers.
+    /// Returns an existing full shielded UA if one was already created.
+    pub async fn full_address(&mut self) -> Result<String, WalletError> {
+        use zingolib::wallet::keys::unified::ReceiverSelection;
+
+        if let Some(encoded) = self
+            .client
+            .unified_addresses_json()
+            .await
+            .members()
+            .find(|address| {
+                address["has_orchard"].as_bool() == Some(true)
+                    && address["has_sapling"].as_bool() == Some(true)
+            })
+            .and_then(|address| address["encoded_address"].as_str())
+        {
+            return Ok(encoded.to_string());
+        }
+
+        let (_id, ua) = self
+            .client
+            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .await
+            .map_err(|e| WalletError::Address(format!("failed to generate address: {e:?}")))?;
+
+        self.save().await?;
+
+        Ok(ua.encode(&self.client.config().chain))
+    }
+
     /// Get the wallet's current balance.
     pub async fn balance(&self) -> Result<WalletBalance, WalletError> {
-        let bal = self.client.account_balance(zip32::AccountId::ZERO).await
+        let bal = self
+            .client
+            .account_balance(zip32::AccountId::ZERO)
+            .await
             .map_err(|e| WalletError::Client(format!("{e}")))?;
 
-        let spendable = bal.confirmed_orchard_balance
-            .map(u64::from)
-            .unwrap_or(0);
-        let pending = bal.unconfirmed_orchard_balance
-            .map(u64::from)
-            .unwrap_or(0);
+        let spendable = bal.confirmed_orchard_balance.map(u64::from).unwrap_or(0);
+        let pending = bal.unconfirmed_orchard_balance.map(u64::from).unwrap_or(0);
 
         Ok(WalletBalance {
             spendable_zat: spendable,
@@ -125,15 +202,20 @@ impl ZimppyWallet {
         amount_zat: u64,
         memo: Option<&str>,
     ) -> Result<String, WalletError> {
-        let recipient: ZcashAddress = to.parse()
+        self.ensure_save_task().await;
+
+        let recipient: ZcashAddress = to
+            .parse()
             .map_err(|e| WalletError::Send(format!("invalid address: {e}")))?;
 
         let amount = Zatoshis::from_u64(amount_zat)
             .map_err(|_| WalletError::Send("invalid amount".to_string()))?;
 
         let memo_bytes = match memo {
-            Some(m) => Some(MemoBytes::from_bytes(m.as_bytes())
-                .map_err(|e| WalletError::Send(format!("memo error: {e}")))?),
+            Some(m) => Some(
+                MemoBytes::from_bytes(m.as_bytes())
+                    .map_err(|e| WalletError::Send(format!("memo error: {e}")))?,
+            ),
             None => None,
         };
 
@@ -146,27 +228,42 @@ impl ZimppyWallet {
         let request = transaction_request_from_receivers(receivers)
             .map_err(|e| WalletError::Send(format!("request error: {e}")))?;
 
-        let txids = self.client.quick_send(request, zip32::AccountId::ZERO, true).await
+        let txids = self
+            .client
+            .quick_send(request, zip32::AccountId::ZERO, true)
+            .await
             .map_err(|e| WalletError::Send(format!("{e}")))?;
+
+        self.client.wait_for_save().await;
+        self.save().await?;
 
         Ok(txids.head.to_string())
     }
 
     /// Rescan the blockchain from birthday, rebuilding shard tree checkpoints.
     pub async fn rescan(&mut self) -> Result<(), WalletError> {
-        self.client.rescan_and_await().await
+        self.ensure_save_task().await;
+        self.client
+            .rescan_and_await()
+            .await
             .map_err(|e| WalletError::Sync(format!("rescan failed: {e}")))?;
+        self.client.wait_for_save().await;
+        self.save().await?;
         Ok(())
     }
 
     /// Save wallet state to disk.
     pub async fn save(&self) -> Result<(), WalletError> {
         let wallet_path = self.client.config().get_wallet_path();
-        let bytes = self.client.wallet.write().await.save()
+        let bytes = self
+            .client
+            .wallet
+            .write()
+            .await
+            .save()
             .map_err(|e| WalletError::Io(e))?;
         if let Some(data) = bytes {
-            std::fs::write(&wallet_path, &data)
-                .map_err(|e| WalletError::Io(e))?;
+            write_wallet_bytes(&wallet_path, &data)?;
         }
         Ok(())
     }
@@ -184,14 +281,16 @@ impl ZimppyWallet {
 
         let wallet = self.client.wallet.read().await;
         let account_id = zip32::AccountId::ZERO;
-        let key_store = wallet.unified_key_store
+        let key_store = wallet
+            .unified_key_store
             .get(&account_id)
             .ok_or_else(|| WalletError::Address("no key store for account 0".to_string()))?;
 
         let ufvk = UnifiedFullViewingKey::try_from(key_store)
             .map_err(|e| WalletError::Address(format!("failed to derive UFVK: {e:?}")))?;
 
-        let orchard_fvk = ufvk.orchard()
+        let orchard_fvk = ufvk
+            .orchard()
             .ok_or_else(|| WalletError::Address("no Orchard key in wallet".to_string()))?;
 
         let ivk = orchard_fvk.to_ivk(Scope::External);
@@ -205,5 +304,167 @@ impl ZimppyWallet {
             zingolib::config::ChainType::Mainnet => "mainnet",
             _ => "testnet",
         }
+    }
+
+    pub async fn start_runtime(&mut self) -> Result<(), WalletError> {
+        self.ensure_save_task().await;
+        self.client
+            .sync()
+            .await
+            .map_err(|e| WalletError::Sync(format!("{e}")))?;
+        Ok(())
+    }
+
+    pub async fn close_runtime(&mut self) -> Result<(), WalletError> {
+        if self.save_task_running {
+            self.save().await?;
+            self.client
+                .shutdown_save_task()
+                .await
+                .map_err(WalletError::Io)?;
+            self.save_task_running = false;
+        }
+        Ok(())
+    }
+
+    pub async fn ensure_ready(&mut self) -> Result<(), WalletError> {
+        self.ensure_save_task().await;
+
+        let sync_result = match self.client.await_sync().await {
+            Ok(result) => Ok(result),
+            Err(LightClientError::SyncNotRunning) => self.client.sync_and_await().await,
+            Err(e) => Err(e),
+        };
+
+        sync_result.map_err(|e| WalletError::Sync(format!("{e}")))?;
+        self.client.wait_for_save().await;
+        self.save().await?;
+        Ok(())
+    }
+
+    async fn ensure_save_task(&mut self) {
+        if !self.save_task_running {
+            self.client.save_task().await;
+            self.save_task_running = true;
+        }
+    }
+}
+
+fn wallet_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("zingo-wallet.dat")
+}
+
+fn write_wallet_bytes(wallet_path: &Path, bytes: &[u8]) -> Result<(), WalletError> {
+    if let Some(parent) = wallet_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let temp_wallet_path = wallet_path.with_extension(
+        wallet_path
+            .extension()
+            .map(|ext| format!("{}.tmp", ext.to_string_lossy()))
+            .unwrap_or_else(|| "tmp".to_string()),
+    );
+
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temp_wallet_path)?;
+    let mut writer = BufWriter::new(file);
+    writer.write_all(bytes)?;
+    let file = writer
+        .into_inner()
+        .map_err(|e| WalletError::Io(e.into_error()))?;
+    file.sync_all()?;
+    fs::rename(&temp_wallet_path, wallet_path)?;
+
+    #[cfg(unix)]
+    if let Some(parent) = wallet_path.parent() {
+        let wallet_dir = fs::File::open(parent)?;
+        let _ignored = wallet_dir.sync_all();
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{wallet_path, WalletConfig, WalletError, ZimppyWallet};
+    use bip0039::{English, Mnemonic};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use zcash_protocol::consensus::NetworkType;
+
+    fn test_wallet_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!("zimppy-wallet-{name}-{unique}"))
+    }
+
+    fn test_config(
+        data_dir: PathBuf,
+        seed_phrase: Option<String>,
+        birthday_height: Option<u32>,
+    ) -> WalletConfig {
+        WalletConfig {
+            data_dir,
+            lwd_endpoint: "https://testnet.zec.rocks".to_string(),
+            network: NetworkType::Test,
+            seed_phrase,
+            birthday_height,
+        }
+    }
+
+    #[tokio::test]
+    async fn open_without_wallet_file_returns_not_initialized() {
+        let data_dir = test_wallet_dir("missing");
+        let result = ZimppyWallet::open(test_config(data_dir, None, None)).await;
+        assert!(matches!(result, Err(WalletError::NotInitialized)));
+    }
+
+    #[tokio::test]
+    async fn create_persists_wallet_file_and_can_reopen() {
+        let data_dir = test_wallet_dir("persist");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let wallet = ZimppyWallet::create(test_config(
+            data_dir.clone(),
+            Some(seed.clone()),
+            Some(3_000_000),
+        ))
+        .await
+        .expect("wallet should be created");
+        let original_address = wallet.address().await.expect("address");
+
+        assert!(wallet_path(&data_dir).exists());
+
+        let reopened = ZimppyWallet::open(test_config(data_dir.clone(), None, None))
+            .await
+            .expect("wallet should reopen");
+        let reopened_address = reopened.address().await.expect("address");
+        assert_eq!(original_address, reopened_address);
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn full_address_is_idempotent() {
+        let data_dir = test_wallet_dir("full-address");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let mut wallet =
+            ZimppyWallet::create(test_config(data_dir.clone(), Some(seed), Some(3_000_000)))
+                .await
+                .expect("wallet should be created");
+
+        let first = wallet.full_address().await.expect("first full address");
+        let second = wallet.full_address().await.expect("second full address");
+        assert_eq!(first, second);
+
+        let _ = fs::remove_dir_all(data_dir);
     }
 }

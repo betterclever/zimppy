@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Once;
 
-use zingolib::config::{ChainType, ZingoConfig};
 use zcash_protocol::consensus::NetworkType;
+use zingolib::config::{ChainType, ZingoConfig};
 
 use crate::error::WalletError;
 
@@ -38,7 +38,9 @@ pub(crate) fn to_zingo_config(config: &WalletConfig) -> Result<ZingoConfig, Wall
         _ => ChainType::Testnet,
     };
 
-    let uri = config.lwd_endpoint.parse()
+    let uri = config
+        .lwd_endpoint
+        .parse()
         .map_err(|e| WalletError::Client(format!("invalid lightwalletd URI: {e}")))?;
 
     Ok(ZingoConfig::build(chain)

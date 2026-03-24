@@ -100,20 +100,40 @@ pub async fn verify_transparent(
 #[derive(Debug, Clone)]
 pub enum VerifyError {
     Rpc(RpcError),
-    ReplayDetected { txid: String },
-    NoOutputs { txid: String },
-    OutputIndexOutOfBounds { txid: String, index: u32, available: u32 },
-    NoAddressInOutput { txid: String, index: u32 },
+    ReplayDetected {
+        txid: String,
+    },
+    NoOutputs {
+        txid: String,
+    },
+    OutputIndexOutOfBounds {
+        txid: String,
+        index: u32,
+        available: u32,
+    },
+    NoAddressInOutput {
+        txid: String,
+        index: u32,
+    },
 }
 
 impl fmt::Display for VerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rpc(e) => write!(f, "rpc error: {e}"),
-            Self::ReplayDetected { txid } => write!(f, "replay detected: txid {txid} already consumed"),
+            Self::ReplayDetected { txid } => {
+                write!(f, "replay detected: txid {txid} already consumed")
+            }
             Self::NoOutputs { txid } => write!(f, "transaction {txid} has no transparent outputs"),
-            Self::OutputIndexOutOfBounds { txid, index, available } => {
-                write!(f, "output index {index} out of bounds for tx {txid} (has {available} outputs)")
+            Self::OutputIndexOutOfBounds {
+                txid,
+                index,
+                available,
+            } => {
+                write!(
+                    f,
+                    "output index {index} out of bounds for tx {txid} (has {available} outputs)"
+                )
             }
             Self::NoAddressInOutput { txid, index } => {
                 write!(f, "no address in output {index} of tx {txid}")

@@ -7,7 +7,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 
-use zimppy_core::{ConsumedTxids, TransparentVerifyRequest, ZebradRpc, verify_transparent};
+use zimppy_core::{verify_transparent, ConsumedTxids, TransparentVerifyRequest, ZebradRpc};
 
 #[cfg(feature = "shielded")]
 use zimppy_core::shielded::{verify_shielded, ShieldedVerifyRequest};
@@ -51,7 +51,10 @@ async fn verify_transparent_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<VerifyTransparentBody>,
 ) -> impl IntoResponse {
-    eprintln!("[verify/transparent] txid={} addr={} amount={}", body.txid, body.expected_address, body.expected_amount_zat);
+    eprintln!(
+        "[verify/transparent] txid={} addr={} amount={}",
+        body.txid, body.expected_address, body.expected_amount_zat
+    );
 
     let amount_zat: u64 = match body.expected_amount_zat.parse() {
         Ok(v) => v,
@@ -59,10 +62,12 @@ async fn verify_transparent_handler(
             eprintln!("[verify/transparent] ERROR: invalid amount");
             return (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::to_value(ErrorResponse {
-                    error: "invalid expectedAmountZat: must be a numeric string".to_string(),
-                })
-                .unwrap_or_default()),
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: "invalid expectedAmountZat: must be a numeric string".to_string(),
+                    })
+                    .unwrap_or_default(),
+                ),
             )
                 .into_response();
         }
@@ -77,17 +82,26 @@ async fn verify_transparent_handler(
 
     match verify_transparent(&state.rpc, &req, &state.consumed).await {
         Ok(result) => {
-            eprintln!("[verify/transparent] result: verified={} amount={}", result.verified, result.observed_amount_zat);
-            (StatusCode::OK, Json(serde_json::to_value(result).unwrap_or_default())).into_response()
+            eprintln!(
+                "[verify/transparent] result: verified={} amount={}",
+                result.verified, result.observed_amount_zat
+            );
+            (
+                StatusCode::OK,
+                Json(serde_json::to_value(result).unwrap_or_default()),
+            )
+                .into_response()
         }
         Err(e) => {
             eprintln!("[verify/transparent] ERROR: {e}");
             (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                Json(serde_json::to_value(ErrorResponse {
-                    error: e.to_string(),
-                })
-                .unwrap_or_default()),
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: e.to_string(),
+                    })
+                    .unwrap_or_default(),
+                ),
             )
                 .into_response()
         }
@@ -99,7 +113,10 @@ async fn verify_shielded_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<VerifyShieldedBody>,
 ) -> impl IntoResponse {
-    eprintln!("[verify/shielded] txid={} challenge={} amount={}", body.txid, body.expected_challenge_id, body.expected_amount_zat);
+    eprintln!(
+        "[verify/shielded] txid={} challenge={} amount={}",
+        body.txid, body.expected_challenge_id, body.expected_amount_zat
+    );
 
     let amount_zat: u64 = match body.expected_amount_zat.parse() {
         Ok(v) => v,
@@ -107,10 +124,12 @@ async fn verify_shielded_handler(
             eprintln!("[verify/shielded] ERROR: invalid amount");
             return (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::to_value(ErrorResponse {
-                    error: "invalid expectedAmountZat: must be a numeric string".to_string(),
-                })
-                .unwrap_or_default()),
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: "invalid expectedAmountZat: must be a numeric string".to_string(),
+                    })
+                    .unwrap_or_default(),
+                ),
             )
                 .into_response();
         }
@@ -125,18 +144,29 @@ async fn verify_shielded_handler(
 
     match verify_shielded(&state.rpc, &req, &state.consumed).await {
         Ok(result) => {
-            eprintln!("[verify/shielded] result: verified={} decrypted={} amount={} memo_matched={}",
-                result.verified, result.outputs_decrypted, result.observed_amount_zat, result.memo_matched);
-            (StatusCode::OK, Json(serde_json::to_value(result).unwrap_or_default())).into_response()
+            eprintln!(
+                "[verify/shielded] result: verified={} decrypted={} amount={} memo_matched={}",
+                result.verified,
+                result.outputs_decrypted,
+                result.observed_amount_zat,
+                result.memo_matched
+            );
+            (
+                StatusCode::OK,
+                Json(serde_json::to_value(result).unwrap_or_default()),
+            )
+                .into_response()
         }
         Err(e) => {
             eprintln!("[verify/shielded] ERROR: {e}");
             (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                Json(serde_json::to_value(ErrorResponse {
-                    error: e.to_string(),
-                })
-                .unwrap_or_default()),
+                Json(
+                    serde_json::to_value(ErrorResponse {
+                        error: e.to_string(),
+                    })
+                    .unwrap_or_default(),
+                ),
             )
                 .into_response()
         }

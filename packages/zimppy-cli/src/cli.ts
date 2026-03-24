@@ -24,7 +24,7 @@ import type { ZimppyWalletNapi } from '@zimppy/core-napi'
 
 const require = createRequire(import.meta.url)
 const { Mppx } = require('mppx/client') as typeof import('mppx/client')
-const { zcashClient, zcashSessionClient } = require('zimppy-ts') as typeof import('zimppy-ts')
+const { zcashClient, zcashSessionClient, isEventStream, parseEvent } = require('zimppy-ts') as typeof import('zimppy-ts')
 
 const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
@@ -34,12 +34,16 @@ const SESSION_FILE = join(CONFIG_DIR, 'session.json')
 const DEFAULT_LWD = 'https://testnet.zec.rocks'
 const DEFAULT_RPC = 'https://zcash-testnet-zebrad.gateway.tatum.io'
 const DEFAULT_DEPOSIT = '100000' // 100,000 zat default session deposit
+const SPINNER_FRAMES = ['|', '/', '-', '\\']
 
 // ── Wallet NAPI ──────────────────────────────────────────────────
 
 async function openWallet(cfg: ZimppyConfig, seedPhrase?: string): Promise<ZimppyWalletNapi> {
   const { ZimppyWalletNapi: Wallet } = require('@zimppy/core-napi') as typeof import('@zimppy/core-napi')
-  return Wallet.open(cfg.dataDir, cfg.lwdServer, cfg.network, seedPhrase ?? null, null)
+  if (seedPhrase) {
+    throw new Error('openWallet only opens existing wallets; use Wallet.restore for seed restores')
+  }
+  return Wallet.open(cfg.dataDir, cfg.lwdServer, cfg.network)
 }
 
 function walletDir(name: string): string {
@@ -116,6 +120,53 @@ function clearSession(): void {
   }
 }
 
+function startProgress(label: string) {
+  const start = Date.now()
+  let frameIndex = 0
+  let suffix = ''
+  const render = () => {
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+    process.stderr.write(`\r  ${SPINNER_FRAMES[frameIndex]} ${label}${suffix ? ` ${suffix}` : ''} (${elapsed}s)`)
+    frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length
+  }
+
+  render()
+  const timer = setInterval(render, 120)
+
+  return {
+    update(nextSuffix: string) {
+      suffix = nextSuffix
+      render()
+    },
+    stop(doneLabel = 'done') {
+      clearInterval(timer)
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+      process.stderr.write(`\r  ${doneLabel} ${label}${suffix ? ` ${suffix}` : ''} (${elapsed}s)\n`)
+    },
+    fail(message: string) {
+      clearInterval(timer)
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+      process.stderr.write(`\r  x ${label}${suffix ? ` ${suffix}` : ''} (${elapsed}s)\n`)
+      process.stderr.write(`  ${message}\n`)
+    },
+  }
+}
+
+async function syncWalletWithProgress(
+  wallet: ZimppyWalletNapi,
+  label: string,
+): Promise<void> {
+  const progress = startProgress(label)
+  try {
+    progress.update('warming wallet')
+    await wallet.ensureReady()
+    progress.stop('  done')
+  } catch (error) {
+    progress.fail((error as Error).message)
+    throw error
+  }
+}
+
 // ── Wallet commands ─────────────────────────────────────────────────
 
 async function walletCreate(args?: string[]): Promise<void> {
@@ -138,7 +189,8 @@ async function walletCreate(args?: string[]): Promise<void> {
 
   console.error(`Creating wallet '${name}'...`)
   try {
-    const wallet = await openWallet(config)
+    const { ZimppyWalletNapi: Wallet } = require('@zimppy/core-napi') as typeof import('@zimppy/core-napi')
+    const wallet = await Wallet.create(config.dataDir, config.lwdServer, config.network, null)
     const addr = await wallet.address()
     const seed = await wallet.seedPhrase()
     console.error('')
@@ -169,6 +221,12 @@ async function walletRestore(args: string[]): Promise<void> {
   }
 
   const name = args[1] ?? 'default'
+  const birthday = args[2] ? Number(args[2]) : undefined
+  if (birthday === undefined || Number.isNaN(birthday)) {
+    console.error('Usage: zimppy wallet restore "your 24 word seed phrase" [name] <birthday>')
+    console.error('Restore requires the wallet birthday height.')
+    process.exit(1)
+  }
   const dataDir = walletDir(name)
   const config: ZimppyConfig = {
     dataDir,
@@ -180,7 +238,8 @@ async function walletRestore(args: string[]): Promise<void> {
 
   console.error(`Restoring wallet '${name}' from seed phrase...`)
   try {
-    const wallet = await openWallet(config, phrase)
+    const { ZimppyWalletNapi: Wallet } = require('@zimppy/core-napi') as typeof import('@zimppy/core-napi')
+    const wallet = await Wallet.restore(config.dataDir, config.lwdServer, config.network, phrase, birthday)
     const addr = await wallet.address()
     console.error(`Address: ${addr}`)
   } catch (e) {
@@ -196,12 +255,10 @@ async function walletRestore(args: string[]): Promise<void> {
 async function walletWhoami(): Promise<void> {
   const cfg = requireConfig()
 
+  let wallet: ZimppyWalletNapi | null = null
   try {
-    const wallet = await openWallet(cfg)
-
-    process.stderr.write('Syncing wallet...')
-    await wallet.sync()
-    console.error(' done')
+    wallet = await openWallet(cfg)
+    await syncWalletWithProgress(wallet, 'Syncing wallet')
 
     const address = await wallet.address()
     const shortAddr = address.length > 50 ? `${address.slice(0, 25)}...${address.slice(-15)}` : address
@@ -221,17 +278,17 @@ async function walletWhoami(): Promise<void> {
     console.log(`---`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
+  } finally {
+    await wallet?.close().catch(() => {})
   }
 }
 
 async function walletBalance(): Promise<void> {
   const cfg = requireConfig()
+  let wallet: ZimppyWalletNapi | null = null
   try {
-    const wallet = await openWallet(cfg)
-
-    process.stderr.write('Syncing...')
-    await wallet.sync()
-    process.stderr.write(' done\n')
+    wallet = await openWallet(cfg)
+    await syncWalletWithProgress(wallet, 'Syncing wallet')
 
     const bal = await wallet.balance()
 
@@ -243,6 +300,8 @@ async function walletBalance(): Promise<void> {
     console.log(`---`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
+  } finally {
+    await wallet?.close().catch(() => {})
   }
 }
 
@@ -289,8 +348,9 @@ async function walletUse(name?: string): Promise<void> {
 
 async function walletSeed(): Promise<void> {
   const cfg = requireConfig()
+  let wallet: ZimppyWalletNapi | null = null
   try {
-    const wallet = await openWallet(cfg)
+    wallet = await openWallet(cfg)
     const seed = await wallet.seedPhrase()
     if (seed) {
       console.log(seed)
@@ -299,6 +359,8 @@ async function walletSeed(): Promise<void> {
     }
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
+  } finally {
+    await wallet?.close().catch(() => {})
   }
 }
 
@@ -421,36 +483,30 @@ async function sendViaWallet(cfg: ZimppyConfig, params: { to: string; amountZat:
   const amountZec = (Number(params.amountZat) / 100_000_000).toFixed(8)
   console.error(`  Sending ${params.amountZat} zat (${amountZec} ZEC)...`)
 
-  const wallet = await openWallet(cfg)
-  process.stderr.write('  Syncing wallet...')
-  // Sync multiple rounds — zingolib shard tree needs multiple passes
-  // after recent transactions. sync() returning true means chain tip
-  // is reached but shard tree checkpoints may still be stale.
-  // Force at least 5 rounds to ensure both Orchard and Sapling trees
-  // have all checkpoints needed for the current chain tip.
-  for (let i = 0; i < 5; i++) {
-    await wallet.sync()
+  let wallet: ZimppyWalletNapi | null = null
+  try {
+    wallet = await openWallet(cfg)
+    await syncWalletWithProgress(wallet, 'Pre-send sync')
+
+    const broadcast = startProgress('Broadcasting transaction')
+    let txid: string
+    try {
+      txid = await wallet.send(params.to, params.amountZat, params.memo)
+      broadcast.stop('  done')
+    } catch (error) {
+      broadcast.fail((error as Error).message)
+      throw error
+    }
+    console.error(`  txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
+    console.error('')
+
+    await waitForConfirmation(cfg, txid)
+    await syncWalletWithProgress(wallet, 'Post-confirmation sync')
+
+    return txid
+  } finally {
+    await wallet?.close().catch(() => {})
   }
-  console.error(' done')
-
-  process.stderr.write('  Broadcasting transaction...')
-  const txid = await wallet.send(params.to, params.amountZat, params.memo)
-  console.error(' done')
-  console.error(`  txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
-  console.error('')
-
-  await waitForConfirmation(cfg, txid)
-
-  // Re-sync after confirmation to update shard tree with change output.
-  // Without this, the next send fails with "shard store checkpoint not found".
-  process.stderr.write('  Syncing post-confirmation...')
-  let postSynced = false
-  for (let i = 0; i < 10 && !postSynced; i++) {
-    postSynced = await wallet.sync()
-  }
-  console.error(' done')
-
-  return txid
 }
 
 function createMppxClient(cfg: ZimppyConfig) {
@@ -490,6 +546,73 @@ function createMppxClient(cfg: ZimppyConfig) {
   })
 
   return { client, sessionClient }
+}
+
+async function renderEventStream(
+  resp: Response,
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body: string | undefined,
+  mppxClient: Awaited<ReturnType<typeof Mppx.create>>,
+  sessionClient: ReturnType<typeof zcashSessionClient>,
+): Promise<void> {
+  const reader = resp.body?.getReader()
+  if (!reader) return
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split('\n\n')
+    buffer = events.pop() ?? ''
+
+    for (const raw of events) {
+      if (!raw.trim()) continue
+      const parsed = parseEvent(raw)
+      if (!parsed) continue
+
+      if (parsed.type === 'message') {
+        try {
+          const data = JSON.parse(parsed.data) as { token?: string }
+          process.stdout.write(data.token ? `${data.token} ` : parsed.data)
+        } catch {
+          process.stdout.write(parsed.data)
+        }
+        continue
+      }
+
+      if (parsed.type === 'payment-need-topup') {
+        console.error('')
+        console.error(`  Balance exhausted, topping up ${parsed.data.balanceRequired} zat...`)
+        sessionClient.topUp()
+        const topUpResp = await mppxClient.fetch(url, { method, headers, body })
+        if (!(topUpResp.status === 200 || topUpResp.status === 204)) {
+          const topUpBody = await topUpResp.text()
+          throw new Error(`top-up failed: ${topUpResp.status} ${topUpBody}`)
+        }
+        console.error('  Top-up accepted, resuming stream')
+        continue
+      }
+
+      if (parsed.type === 'payment-receipt') {
+        console.error('')
+        console.error(`  Stream receipt: ${parsed.data.totalSpent} zat over ${parsed.data.totalChunks} chunks`)
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const parsed = parseEvent(buffer)
+    if (parsed?.type === 'message') {
+      process.stdout.write(parsed.data)
+    }
+  }
+  process.stdout.write('\n')
 }
 
 // ── Request command ─────────────────────────────────────────────────
@@ -547,22 +670,33 @@ async function handleRequest(args: string[]): Promise<void> {
   // - If active session: sends bearer credential automatically
   const resp = await mppxClient.fetch(url, { method, headers, body })
 
+  if (isEventStream(resp)) {
+    const session = sessionClient.getSession()
+    if (session && session.sessionId) {
+      saveSession({
+        sessionId: session.sessionId,
+        bearer: session.bearer,
+        url: baseUrl,
+        endpoint: new URL(url).pathname,
+      })
+    }
+    await renderEventStream(resp, url, method, headers, body, mppxClient, sessionClient)
+    return
+  }
+
   const result = await resp.text()
 
-  // Extract session ID from response body if a session was opened
   const activeSession = sessionClient.getSession()
   if (activeSession && !activeSession.sessionId) {
-    // Session was just opened — extract sessionId from server response
     try {
-      const body = JSON.parse(result)
-      if (body.sessionId) {
-        sessionClient.setSessionId(body.sessionId)
-        console.error(`  Session opened: ${body.sessionId}`)
+      const responseBody = JSON.parse(result)
+      if (responseBody.sessionId) {
+        sessionClient.setSessionId(responseBody.sessionId)
+        console.error(`  Session opened: ${responseBody.sessionId}`)
       }
     } catch { /* not JSON or no sessionId */ }
   }
 
-  // Persist session state
   const session = sessionClient.getSession()
   if (session && session.sessionId) {
     saveSession({

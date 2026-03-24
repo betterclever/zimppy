@@ -184,6 +184,7 @@ export function zcashSession(options: ZcashSessionServerOptions) {
   ): Promise<Receipt.Receipt> {
     const { depositTxid, refundAddress, bearerSecret } = payload
     const consumedKey = `zcash-session:consumed:${depositTxid}`
+    const requiredDeposit = Number(request.suggestedDeposit ?? request.amount)
 
     // Replay guard
     if (await store.get(consumedKey)) {
@@ -196,7 +197,7 @@ export function zcashSession(options: ZcashSessionServerOptions) {
       txid: depositTxid,
       orchardIvk,
       expectedChallengeId: '', // deposits don't need challenge binding
-      expectedAmountZat: request.amount,
+      expectedAmountZat: String(requiredDeposit),
     })
 
     if (!verifyResult.verified || verifyResult.outputsDecrypted === 0) {
@@ -224,7 +225,7 @@ export function zcashSession(options: ZcashSessionServerOptions) {
     }
 
     await store.put(`zcash-session:${sessionId}`, state)
-    console.error(`[session:open] Created session ${sessionId}, deposit=${depositAmount} zat, charged=${chargeAmount} zat`)
+    console.error(`[session:open] Created session ${sessionId}, deposit=${depositAmount} zat, requiredDeposit=${requiredDeposit} zat, charged=${chargeAmount} zat`)
 
     return Receipt.from({
       method: 'zcash',

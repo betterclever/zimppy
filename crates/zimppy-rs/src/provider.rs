@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use mpp::protocol::core::{PaymentChallenge, PaymentCredential, PaymentPayload};
 use mpp::client::PaymentProvider;
 use mpp::error::MppError;
+use mpp::protocol::core::{PaymentChallenge, PaymentCredential, PaymentPayload};
 
 use zimppy_core::rpc::ZebradRpc;
 use zimppy_wallet::{WalletConfig, ZimppyWallet};
@@ -37,7 +37,12 @@ impl ZcashPaymentProvider {
     }
 
     /// Send ZEC via native wallet and return the txid
-    async fn send_payment(&self, address: &str, amount_zat: u64, memo: &str) -> Result<String, MppError> {
+    async fn send_payment(
+        &self,
+        address: &str,
+        amount_zat: u64,
+        memo: &str,
+    ) -> Result<String, MppError> {
         eprintln!("[ZcashProvider] Opening wallet and syncing...");
         let mut wallet = ZimppyWallet::open(WalletConfig {
             data_dir: self.wallet_config.data_dir.clone(),
@@ -45,15 +50,25 @@ impl ZcashPaymentProvider {
             network: self.wallet_config.network,
             seed_phrase: self.wallet_config.seed_phrase.clone(),
             birthday_height: self.wallet_config.birthday_height,
-        }).await.map_err(|e| MppError::InvalidConfig(format!("wallet open failed: {e}")))?;
+        })
+        .await
+        .map_err(|e| MppError::InvalidConfig(format!("wallet open failed: {e}")))?;
 
-        wallet.sync().await
+        wallet
+            .sync()
+            .await
             .map_err(|e| MppError::InvalidConfig(format!("wallet sync failed: {e}")))?;
 
-        eprintln!("[ZcashProvider] Sending {} zat to {}...", amount_zat, &address[..20.min(address.len())]);
+        eprintln!(
+            "[ZcashProvider] Sending {} zat to {}...",
+            amount_zat,
+            &address[..20.min(address.len())]
+        );
         eprintln!("[ZcashProvider] Memo: {memo}");
 
-        let txid = wallet.send(address, amount_zat, Some(memo)).await
+        let txid = wallet
+            .send(address, amount_zat, Some(memo))
+            .await
             .map_err(|e| MppError::InvalidConfig(format!("send failed: {e}")))?;
 
         eprintln!("[ZcashProvider] Broadcast txid: {txid}");
@@ -93,8 +108,9 @@ impl PaymentProvider for ZcashPaymentProvider {
 
     async fn pay(&self, challenge: &PaymentChallenge) -> Result<PaymentCredential, MppError> {
         // Parse challenge request to get recipient, amount, memo
-        let request: serde_json::Value = challenge.request.decode()
-            .map_err(|e| MppError::InvalidConfig(format!("failed to decode challenge request: {e}")))?;
+        let request: serde_json::Value = challenge.request.decode().map_err(|e| {
+            MppError::InvalidConfig(format!("failed to decode challenge request: {e}"))
+        })?;
 
         let recipient = request["recipient"]
             .as_str()
@@ -104,14 +120,20 @@ impl PaymentProvider for ZcashPaymentProvider {
             .ok_or_else(|| MppError::InvalidConfig("missing amount in challenge".to_string()))?;
         let memo = request["methodDetails"]["memo"]
             .as_str()
-            .ok_or_else(|| MppError::InvalidConfig("missing methodDetails.memo in challenge".to_string()))?
+            .ok_or_else(|| {
+                MppError::InvalidConfig("missing methodDetails.memo in challenge".to_string())
+            })?
             .replace("{id}", &challenge.id);
 
-        let amount_zat: u64 = amount_str.parse()
+        let amount_zat: u64 = amount_str
+            .parse()
             .map_err(|_| MppError::InvalidConfig("invalid amount".to_string()))?;
 
         eprintln!("[ZcashProvider] Received 402 challenge:");
-        eprintln!("[ZcashProvider]   recipient: {}", &recipient[..20.min(recipient.len())]);
+        eprintln!(
+            "[ZcashProvider]   recipient: {}",
+            &recipient[..20.min(recipient.len())]
+        );
         eprintln!("[ZcashProvider]   amount: {} zat", amount_zat);
         eprintln!("[ZcashProvider]   memo: {}", &memo);
 

@@ -8290,6 +8290,7 @@ dependencies = [
  "tokio",
  "zcash_protocol",
  "zimppy-rs",
+ "zimppy-wallet",
 ]
 
 [[package]]
@@ -8359,6 +8360,7 @@ dependencies = [
  "tokio",
  "zcash_protocol",
  "zimppy-rs",
+ "zimppy-wallet",
 ]
 
 [[package]]
@@ -8415,6 +8417,7 @@ dependencies = [
 [[package]]
 name = "zingo-price"
 version = "0.0.1"
+source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.0-rc.6#127332852e47a99c350b6fb88a60d65dbcef982e"
 dependencies = [
  "byteorder",
  "reqwest",
@@ -8448,7 +8451,8 @@ dependencies = [
 
 [[package]]
 name = "zingolib"
-version = "3.0.0"
+version = "3.0.0-rc.6"
+source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.0-rc.6#127332852e47a99c350b6fb88a60d65dbcef982e"
 dependencies = [
  "append-only-vec",
  "bech32 0.11.1",
@@ -8567,7 +8571,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "pepper-sync"
-version = "0.2.0"

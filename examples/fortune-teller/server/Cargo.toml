@@ -18,6 +18,7 @@ tokio = { version = "1", features = ["full"] }
 async-stream = "0.3"
 zcash_protocol = "0.7"
 zimppy-rs = { path = "../../../crates/zimppy-rs" }
+zimppy-wallet = { path = "../../../crates/zimppy-wallet" }
 
 [lints]
 workspace = true

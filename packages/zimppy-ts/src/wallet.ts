@@ -67,8 +67,6 @@ export async function resolveWallet(name?: string): Promise<ResolvedWallet> {
     dataDir,
     config.lwdServer,
     config.network,
-    null, // don't pass seed — load existing
-    null,
   )
 
   const [address, orchardIvk, walletNetwork] = await Promise.all([
@@ -109,8 +107,6 @@ export async function openWallet(name?: string) {
     dataDir,
     config.lwdServer,
     config.network,
-    null,
-    null,
   )
 
   return { wallet, config, walletName }

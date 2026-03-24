@@ -52,7 +52,11 @@ impl SseEvent {
     pub fn to_sse_string(&self) -> String {
         match self {
             Self::Message(data) => format!("event: message\ndata: {data}\n\n"),
-            Self::PaymentNeedTopup { session_id, balance_required, balance_spent } => {
+            Self::PaymentNeedTopup {
+                session_id,
+                balance_required,
+                balance_spent,
+            } => {
                 let json = serde_json::json!({
                     "sessionId": session_id,
                     "balanceRequired": balance_required,
@@ -60,7 +64,11 @@ impl SseEvent {
                 });
                 format!("event: payment-need-topup\ndata: {json}\n\n")
             }
-            Self::PaymentReceipt { session_id, total_spent, total_chunks } => {
+            Self::PaymentReceipt {
+                session_id,
+                total_spent,
+                total_chunks,
+            } => {
                 let json = serde_json::json!({
                     "sessionId": session_id,
                     "totalSpent": total_spent,
@@ -119,7 +127,8 @@ where
                 let mut funded = false;
 
                 while std::time::Instant::now() < deadline {
-                    tokio::time::sleep(std::time::Duration::from_millis(options.poll_interval_ms)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(options.poll_interval_ms))
+                        .await;
                     if try_deduct(session, &options.session_id, options.tick_cost_zat).is_ok() {
                         total_spent += options.tick_cost_zat;
                         total_chunks += 1;

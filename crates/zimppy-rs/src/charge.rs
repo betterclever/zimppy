@@ -2,7 +2,7 @@ use std::future::Future;
 
 use zimppy_core::replay::ConsumedTxids;
 use zimppy_core::rpc::ZebradRpc;
-use zimppy_core::shielded::{self, ShieldedVerifyRequest, ShieldedVerifyError};
+use zimppy_core::shielded::{self, ShieldedVerifyError, ShieldedVerifyRequest};
 
 /// Zcash charge verification method using Orchard shielded transactions.
 ///
@@ -88,7 +88,9 @@ impl mpp::protocol::traits::ChargeMethod for ZcashChargeMethod {
         &self,
         credential: &mpp::protocol::core::PaymentCredential,
         request: &mpp::protocol::intents::ChargeRequest,
-    ) -> impl std::future::Future<Output = Result<mpp::protocol::core::Receipt, mpp::protocol::traits::VerificationError>> + Send {
+    ) -> impl std::future::Future<
+        Output = Result<mpp::protocol::core::Receipt, mpp::protocol::traits::VerificationError>,
+    > + Send {
         let credential = credential.clone();
         let amount_str = request.amount.clone();
         let rpc = self.rpc.clone();
@@ -96,11 +98,17 @@ impl mpp::protocol::traits::ChargeMethod for ZcashChargeMethod {
         let consumed = self.consumed.clone();
 
         async move {
-            let amount: u64 = amount_str.parse().map_err(|_| mpp::protocol::traits::VerificationError::new("invalid amount"))?;
+            let amount: u64 = amount_str
+                .parse()
+                .map_err(|_| mpp::protocol::traits::VerificationError::new("invalid amount"))?;
             // Parse txid from payload (Zcash uses {txid: "..."}, not Tempo's {type, hash})
-            let txid = credential.payload.get("txid")
+            let txid = credential
+                .payload
+                .get("txid")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| mpp::protocol::traits::VerificationError::new("missing txid in payload"))?
+                .ok_or_else(|| {
+                    mpp::protocol::traits::VerificationError::new("missing txid in payload")
+                })?
                 .to_string();
             let challenge_id = credential.challenge.id.clone();
             let req = shielded::ShieldedVerifyRequest {
