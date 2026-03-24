@@ -61,7 +61,8 @@ export async function resolveWallet(name?: string): Promise<ResolvedWallet> {
     )
   }
 
-  const { ZimppyWalletNapi } = require('zimppy-napi') as { ZimppyWalletNapi: any }
+  const { ZimppyWalletNapi } = require('@zimppy/core-napi') as { ZimppyWalletNapi: any }
+  console.error('[zimppy-ts:resolveWallet:open]', { walletName, dataDir })
 
   const wallet = await ZimppyWalletNapi.open(
     dataDir,
@@ -73,7 +74,10 @@ export async function resolveWallet(name?: string): Promise<ResolvedWallet> {
     wallet.address(),
     wallet.orchardIvk(),
     Promise.resolve(wallet.network() as string),
-  ])
+  ]).finally(async () => {
+    console.error('[zimppy-ts:resolveWallet:close]', { walletName, dataDir })
+    await wallet.close().catch(() => {})
+  })
 
   const network = (walletNetwork === 'mainnet' ? 'mainnet' : 'testnet') as 'testnet' | 'mainnet'
 
@@ -101,7 +105,8 @@ export async function openWallet(name?: string) {
     )
   }
 
-  const { ZimppyWalletNapi } = require('zimppy-napi') as { ZimppyWalletNapi: any }
+  const { ZimppyWalletNapi } = require('@zimppy/core-napi') as { ZimppyWalletNapi: any }
+  console.error('[zimppy-ts:openWallet]', { walletName, dataDir })
 
   const wallet = await ZimppyWalletNapi.open(
     dataDir,

@@ -62,23 +62,32 @@ export function zcash(options: ZcashOptions = {}): ReturnType<typeof zcashClient
   return zcashClientRaw({
     source: options.source,
     createPayment: async ({ challenge, challengeId }) => {
+      console.error('[zimppy-ts:client:createPayment]', {
+        walletName,
+        challengeId,
+        recipient: challenge.recipient,
+        amount: challenge.amount,
+      })
       const { wallet } = await openWallet(walletName)
+      try {
+        await wallet.ensureReady()
 
-      await wallet.ensureReady()
+        // Build memo from challenge template
+        const memo = challenge.methodDetails?.memo
+          ?.replace('{id}', challengeId) ?? challengeId
 
-      // Build memo from challenge template
-      const memo = challenge.methodDetails?.memo
-        ?.replace('{id}', challengeId) ?? challengeId
+        const txid = await wallet.send(
+          challenge.recipient,
+          challenge.amount,
+          memo,
+        )
 
-      const txid = await wallet.send(
-        challenge.recipient,
-        challenge.amount,
-        memo,
-      )
-
-      await wallet.ensureReady()
-
-      return { txid }
+        console.error('[zimppy-ts:client:createPayment:txid]', { challengeId, txid })
+        return { txid }
+      } finally {
+        console.error('[zimppy-ts:client:createPayment:close]', { walletName, challengeId })
+        await wallet.close().catch(() => {})
+      }
     },
   })
 }
@@ -132,8 +141,6 @@ zcash.session = function session(options: ZcashSessionOptions = {}) {
       await wallet.ensureReady()
 
       const txid = await wallet.send(to, amountZat, memo)
-
-      await wallet.ensureReady()
 
       return txid
     },

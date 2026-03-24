@@ -5,6 +5,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bip0039::Mnemonic;
 use zcash_address::ZcashAddress;
@@ -43,12 +44,37 @@ pub struct ZimppyWallet {
     save_task_running: bool,
 }
 
+fn trace_id() -> String {
+    format!(
+        "pid={} ts_ms={}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_millis()
+    )
+}
+
+fn trace_wallet(event: &str, details: impl std::fmt::Display) {
+    eprintln!("[zimppy-wallet:{event}] {} {details}", trace_id());
+}
+
 impl ZimppyWallet {
     /// Open an existing wallet from disk.
     ///
     /// If the wallet file does not exist, this returns [`WalletError::NotInitialized`]
     /// unless a seed phrase is provided, in which case the wallet is restored.
     pub async fn open(wallet_config: WalletConfig) -> Result<Self, WalletError> {
+        trace_wallet(
+            "open:begin",
+            format!(
+                "data_dir={} exists={} seed_present={} birthday={:?}",
+                wallet_config.data_dir.display(),
+                wallet_path(&wallet_config.data_dir).exists(),
+                wallet_config.seed_phrase.is_some(),
+                wallet_config.birthday_height
+            ),
+        );
         if wallet_path(&wallet_config.data_dir).exists() {
             return Self::open_existing(wallet_config);
         }
@@ -62,6 +88,16 @@ impl ZimppyWallet {
 
     /// Create a new wallet or restore one from seed, then persist it immediately.
     pub async fn create(wallet_config: WalletConfig) -> Result<Self, WalletError> {
+        trace_wallet(
+            "create:begin",
+            format!(
+                "data_dir={} wallet_exists={} seed_present={} birthday={:?}",
+                wallet_config.data_dir.display(),
+                wallet_path(&wallet_config.data_dir).exists(),
+                wallet_config.seed_phrase.is_some(),
+                wallet_config.birthday_height
+            ),
+        );
         config::ensure_tls();
         let zingo_config = config::to_zingo_config(&wallet_config)?;
         let wallet_path = wallet_path(&wallet_config.data_dir);
@@ -115,12 +151,20 @@ impl ZimppyWallet {
             save_task_running: false,
         };
         wallet.save().await?;
+        trace_wallet(
+            "create:end",
+            format!("wallet_path={}", wallet.client.config().get_wallet_path().display()),
+        );
         Ok(wallet)
     }
 
     fn open_existing(wallet_config: WalletConfig) -> Result<Self, WalletError> {
         config::ensure_tls();
         let zingo_config = config::to_zingo_config(&wallet_config)?;
+        trace_wallet(
+            "open_existing",
+            format!("wallet_path={}", zingo_config.get_wallet_path().display()),
+        );
         let client = LightClient::create_from_wallet_path(zingo_config)
             .map_err(|e| WalletError::Client(format!("{e}")))?;
         Ok(Self {
@@ -131,7 +175,15 @@ impl ZimppyWallet {
 
     /// Sync the wallet with the Zcash blockchain via lightwalletd.
     pub async fn sync(&mut self) -> Result<SyncStatus, WalletError> {
+        trace_wallet(
+            "sync:begin",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
         self.ensure_ready().await?;
+        trace_wallet(
+            "sync:end",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
         Ok(SyncStatus { is_synced: true })
     }
 
@@ -196,14 +248,27 @@ impl ZimppyWallet {
 
     /// Send ZEC to a recipient address with an optional memo.
     /// Returns the transaction ID as a hex string.
+    ///
+    /// Matches zingo-cli's send pattern exactly:
+    /// - Does NOT await sync before send (quick_send pauses sync internally)
+    /// - Does NOT manually save (background save_task handles persistence)
+    /// - Just calls quick_send() directly, like zingo-cli's QuickSendCommand
     pub async fn send(
         &mut self,
         to: &str,
         amount_zat: u64,
         memo: Option<&str>,
     ) -> Result<String, WalletError> {
-        self.ensure_save_task().await;
-
+        trace_wallet(
+            "send:begin",
+            format!(
+                "wallet_path={} to={} amount={} memo={:?}",
+                self.client.config().get_wallet_path().display(),
+                to,
+                amount_zat,
+                memo
+            ),
+        );
         let recipient: ZcashAddress = to
             .parse()
             .map_err(|e| WalletError::Send(format!("invalid address: {e}")))?;
@@ -234,9 +299,14 @@ impl ZimppyWallet {
             .await
             .map_err(|e| WalletError::Send(format!("{e}")))?;
 
-        self.client.wait_for_save().await;
-        self.save().await?;
-
+        trace_wallet(
+            "send:end",
+            format!(
+                "wallet_path={} txid={}",
+                self.client.config().get_wallet_path().display(),
+                txids.head
+            ),
+        );
         Ok(txids.head.to_string())
     }
 
@@ -247,14 +317,14 @@ impl ZimppyWallet {
             .rescan_and_await()
             .await
             .map_err(|e| WalletError::Sync(format!("rescan failed: {e}")))?;
-        self.client.wait_for_save().await;
-        self.save().await?;
+        // No manual save — background save_task handles persistence
         Ok(())
     }
 
     /// Save wallet state to disk.
     pub async fn save(&self) -> Result<(), WalletError> {
         let wallet_path = self.client.config().get_wallet_path();
+        trace_wallet("save:begin", format!("wallet_path={}", wallet_path.display()));
         let bytes = self
             .client
             .wallet
@@ -263,8 +333,15 @@ impl ZimppyWallet {
             .save()
             .map_err(|e| WalletError::Io(e))?;
         if let Some(data) = bytes {
+            trace_wallet(
+                "save:write",
+                format!("wallet_path={} bytes={}", wallet_path.display(), data.len()),
+            );
             write_wallet_bytes(&wallet_path, &data)?;
+        } else {
+            trace_wallet("save:skip", format!("wallet_path={}", wallet_path.display()));
         }
+        trace_wallet("save:end", format!("wallet_path={}", wallet_path.display()));
         Ok(())
     }
 
@@ -307,27 +384,54 @@ impl ZimppyWallet {
     }
 
     pub async fn start_runtime(&mut self) -> Result<(), WalletError> {
+        trace_wallet(
+            "runtime:start",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
         self.ensure_save_task().await;
         self.client
             .sync()
             .await
             .map_err(|e| WalletError::Sync(format!("{e}")))?;
+        trace_wallet(
+            "runtime:start:done",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
         Ok(())
     }
 
     pub async fn close_runtime(&mut self) -> Result<(), WalletError> {
+        trace_wallet(
+            "runtime:close",
+            format!(
+                "wallet_path={} save_task_running={}",
+                self.client.config().get_wallet_path().display(),
+                self.save_task_running
+            ),
+        );
         if self.save_task_running {
-            self.save().await?;
+            // Wait for any pending save, then do a final save before shutting down
+            self.client.wait_for_save().await;
             self.client
                 .shutdown_save_task()
                 .await
                 .map_err(WalletError::Io)?;
             self.save_task_running = false;
+            // Final save after save_task is stopped (no concurrent writer)
+            self.save().await?;
         }
+        trace_wallet(
+            "runtime:close:done",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
         Ok(())
     }
 
     pub async fn ensure_ready(&mut self) -> Result<(), WalletError> {
+        trace_wallet(
+            "ensure_ready:begin",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
         self.ensure_save_task().await;
 
         let sync_result = match self.client.await_sync().await {
@@ -337,13 +441,21 @@ impl ZimppyWallet {
         };
 
         sync_result.map_err(|e| WalletError::Sync(format!("{e}")))?;
-        self.client.wait_for_save().await;
-        self.save().await?;
+        trace_wallet(
+            "ensure_ready:end",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
+        // No manual save — let the background save_task handle persistence
+        // (matches zingo-cli behavior: never manually serialize wallet state)
         Ok(())
     }
 
     async fn ensure_save_task(&mut self) {
         if !self.save_task_running {
+            trace_wallet(
+                "save_task:start",
+                format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+            );
             self.client.save_task().await;
             self.save_task_running = true;
         }

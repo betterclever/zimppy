@@ -1,6 +1,7 @@
 use napi_derive::napi;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex as TokioMutex;
 
 use zimppy_core::replay::ConsumedTxids;
@@ -129,6 +130,17 @@ pub struct ZimppyWalletNapi {
     closed: Arc<TokioMutex<bool>>,
 }
 
+fn trace_napi(event: &str, details: impl std::fmt::Display) {
+    eprintln!(
+        "[zimppy-napi:{event}] pid={} ts_ms={} {details}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_millis()
+    );
+}
+
 #[napi]
 impl ZimppyWalletNapi {
     /// Open an existing wallet.
@@ -138,6 +150,10 @@ impl ZimppyWalletNapi {
         lwd_endpoint: String,
         network: String,
     ) -> napi::Result<Self> {
+        trace_napi(
+            "open",
+            format!("data_dir={} lwd_endpoint={} network={}", data_dir, lwd_endpoint, network),
+        );
         Self::open_inner(data_dir, lwd_endpoint, network, None, None, false).await
     }
 
@@ -204,6 +220,7 @@ impl ZimppyWalletNapi {
         let wallet = Arc::new(TokioMutex::new(wallet));
         {
             let mut guard = wallet.lock().await;
+            trace_napi("open_inner:start_runtime", "starting runtime");
             guard
                 .start_runtime()
                 .await
@@ -241,11 +258,13 @@ impl ZimppyWalletNapi {
     #[napi]
     pub async fn ensure_ready(&self) -> napi::Result<bool> {
         self.ensure_open().await?;
+        trace_napi("ensure_ready", "begin");
         let mut wallet = self.wallet.lock().await;
         wallet
             .ensure_ready()
             .await
             .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))?;
+        trace_napi("ensure_ready", "end");
         Ok(true)
     }
 
@@ -285,6 +304,10 @@ impl ZimppyWalletNapi {
         memo: Option<String>,
     ) -> napi::Result<String> {
         self.ensure_open().await?;
+        trace_napi(
+            "send",
+            format!("to={} amount_zat={} memo={:?}", to, amount_zat, memo),
+        );
         let amount: u64 = amount_zat
             .parse()
             .map_err(|_| napi::Error::from_reason("invalid amount"))?;
@@ -293,6 +316,7 @@ impl ZimppyWalletNapi {
             .send(&to, amount, memo.as_deref())
             .await
             .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))?;
+        trace_napi("send", format!("txid={txid}"));
         Ok(txid)
     }
 
@@ -341,8 +365,10 @@ impl ZimppyWalletNapi {
 
     #[napi]
     pub async fn close(&self) -> napi::Result<()> {
+        trace_napi("close", "begin");
         let mut closed = self.closed.lock().await;
         if *closed {
+            trace_napi("close", "already_closed");
             return Ok(());
         }
 
@@ -352,6 +378,7 @@ impl ZimppyWalletNapi {
             .await
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         *closed = true;
+        trace_napi("close", "end");
         Ok(())
     }
 

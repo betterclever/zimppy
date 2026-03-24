@@ -6,8 +6,9 @@ const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const binaryNames = [
-  'index.darwin-arm64.node',
+  'index.linux-x64-gnu.node',
   'zimppy-core.darwin-arm64.node',
+  'index.darwin-arm64.node',
 ]
 
 let nativeModule = null
