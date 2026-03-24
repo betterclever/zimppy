@@ -59,6 +59,7 @@ async fn main() -> Result<(), WalletError> {
                 "Balance: {} zat (spendable: {}, pending: {})",
                 bal.total_zat, bal.spendable_zat, bal.pending_zat
             );
+            wallet.close_runtime().await?;
         }
 
         "address" => {
@@ -88,9 +89,41 @@ async fn main() -> Result<(), WalletError> {
             let mut wallet = open_existing(&data_dir, &lwd, network).await?;
             eprintln!("Syncing before send...");
             wallet.sync().await?;
-            eprintln!("Sending {} zat to {}...", amount, to);
+
+            let bal = wallet.balance().await?;
+            eprintln!(
+                "Balance: spendable={} pending={} total={}",
+                bal.spendable_zat, bal.pending_zat, bal.total_zat
+            );
+
+            let short = if to.len() > 25 { &to[..25] } else { to.as_str() };
+            eprintln!("Sending {} zat to {}...", amount, short);
             let txid = wallet.send(to, amount, memo).await?;
-            println!("Sent: {txid}");
+            eprintln!("Broadcast: txid={txid}");
+
+            // Wait for confirmation: poll sync every 15s until change is confirmed
+            eprintln!("Waiting for confirmation...");
+            for attempt in 1..=20 {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                wallet.sync().await?;
+                let bal = wallet.balance().await?;
+                eprint!(
+                    "\r  [{attempt}/20] spendable={} pending={}    ",
+                    bal.spendable_zat, bal.pending_zat
+                );
+                if bal.pending_zat == 0 && bal.spendable_zat > 0 {
+                    eprintln!("\nConfirmed!");
+                    break;
+                }
+            }
+
+            let bal = wallet.balance().await?;
+            eprintln!(
+                "Final: spendable={} pending={} total={}",
+                bal.spendable_zat, bal.pending_zat, bal.total_zat
+            );
+            wallet.close_runtime().await?;
+            println!("{txid}");
         }
 
         _ => {

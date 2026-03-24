@@ -364,6 +364,88 @@ async function walletSeed(): Promise<void> {
   }
 }
 
+async function waitForSpendable(wallet: ZimppyWalletNapi, label: string): Promise<void> {
+  const progress = startProgress(label)
+  for (let attempt = 1; attempt <= 40; attempt++) {
+    await new Promise(r => setTimeout(r, 15_000))
+    await wallet.sync()
+    const bal = await wallet.balance()
+    progress.update(`[${attempt}/40] spendable=${bal.spendableZat} pending=${bal.pendingZat}`)
+    if (Number(bal.pendingZat) === 0 && Number(bal.spendableZat) > 0) {
+      progress.stop('  confirmed')
+      return
+    }
+  }
+  progress.fail('timed out waiting for confirmation')
+  throw new Error('Timed out waiting for pending balance to confirm')
+}
+
+async function walletSend(args: string[]): Promise<void> {
+  // Parse --wait flag
+  const waitFlag = args.includes('--wait')
+  const filtered = args.filter(a => a !== '--wait')
+
+  const to = filtered[0]
+  const amountZat = filtered[1]
+  const memo = filtered[2] ?? undefined
+
+  if (!to || !amountZat) {
+    console.error('Usage: zimppy wallet send <address> <amount_zat> [memo] [--wait]')
+    console.error('')
+    console.error('  --wait    Wait for this transaction to confirm before exiting')
+    console.error('            Without --wait, exits after broadcast but next send')
+    console.error('            will wait for pending balance to confirm first.')
+    process.exit(1)
+  }
+
+  const cfg = requireConfig()
+  const amountZec = (Number(amountZat) / 100_000_000).toFixed(8)
+
+  let wallet: ZimppyWalletNapi | null = null
+  try {
+    wallet = await openWallet(cfg)
+    await syncWalletWithProgress(wallet, 'Syncing')
+
+    // If there's pending balance from a previous send, wait for it to confirm
+    const bal = await wallet.balance()
+    console.error(`  Balance: spendable=${bal.spendableZat} pending=${bal.pendingZat} total=${bal.totalZat} zat`)
+
+    if (Number(bal.pendingZat) > 0 && Number(bal.spendableZat) < Number(amountZat) + 10_000) {
+      console.error('  Pending balance from previous send, waiting for confirmation...')
+      await waitForSpendable(wallet, 'Awaiting prior confirmation')
+      const updated = await wallet.balance()
+      console.error(`  Balance: spendable=${updated.spendableZat} pending=${updated.pendingZat} total=${updated.totalZat} zat`)
+    }
+
+    // Send
+    console.error(`  Sending ${amountZat} zat (${amountZec} ZEC) to ${to.slice(0, 25)}...`)
+    const broadcast = startProgress('Broadcasting')
+    let txid: string
+    try {
+      txid = await wallet.send(to, amountZat, memo ?? null)
+      broadcast.stop('  done')
+    } catch (error) {
+      broadcast.fail((error as Error).message)
+      throw error
+    }
+    console.error(`  txid: ${txid}`)
+
+    // If --wait, poll until this tx confirms
+    if (waitFlag) {
+      await waitForSpendable(wallet, 'Awaiting confirmation')
+      const postBal = await wallet.balance()
+      console.error(`  Balance: spendable=${postBal.spendableZat} pending=${postBal.pendingZat} total=${postBal.totalZat} zat`)
+    }
+
+    console.error('  Send complete.')
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+    process.exit(1)
+  } finally {
+    await wallet?.close().catch(() => {})
+  }
+}
+
 async function walletFund(): Promise<void> {
   const cfg = requireConfig()
   console.log('To fund your zimppy wallet:')
@@ -787,6 +869,7 @@ Commands:
   zimppy wallet whoami           Show address + balance + network
   zimppy wallet balance          Show balance
   zimppy wallet seed             Show seed phrase (for backup)
+  zimppy wallet send <addr> <zat> Send ZEC (--wait to block until confirmed)
   zimppy wallet fund             How to add funds
   zimppy wallet services         List available paid services
   zimppy request <URL>           Make HTTP request with auto-pay
@@ -822,6 +905,7 @@ Examples:
       case 'use': return walletUse(args[2])
       case 'whoami': return walletWhoami()
       case 'balance': return walletBalance()
+      case 'send': return walletSend(args.slice(2))
       case 'seed': return walletSeed()
       case 'fund': return walletFund()
       case 'services': return walletServices(args.slice(2))
