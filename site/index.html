@@ -4,7 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>zimppy — Private Machine Payments on Zcash</title>
-  <meta name="description" content="The private payment method for MPP. Agents pay for APIs with Zcash shielded transactions — sender, receiver, amount, and memo encrypted on-chain.">
+  <meta name="description" content="Zcash-native MPP implementation. Shielded payments between agents and APIs — no party, amount, or metadata ever exposed.">
+  <meta property="og:title" content="zimppy — Private Machine Payments on Zcash">
+  <meta property="og:description" content="The Zcash payment method for MPP. Shielded by default.">
+  <meta property="og:image" content="https://zimppy.xyz/og.png">
+  <meta property="og:url" content="https://zimppy.xyz">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="zimppy — Private Machine Payments on Zcash">
+  <meta name="twitter:description" content="The Zcash payment method for MPP. Shielded by default.">
+  <meta name="twitter:image" content="https://zimppy.xyz/og.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Bitcount+Prop+Single+Ink&display=swap" rel="stylesheet">
@@ -54,17 +63,68 @@
       background: rgba(167, 139, 250, 0.3);
     }
 
+    /* ── Subtle motion ── */
+    @media (prefers-reduced-motion: no-preference) {
+      .why-card, .cmp-card, .int-card, .sess-unified, .cli-cmd {
+        transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.25s ease;
+      }
+      .why-card:hover, .cmp-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--border-hover);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+      }
+      .int-card:hover {
+        border-color: var(--border-hover);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+      }
+      .cli-cmd {
+        padding: 0.75rem; border-radius: 8px;
+        border: 1px solid transparent;
+      }
+      .cli-cmd:hover {
+        border-color: var(--border);
+        background: var(--bg-card);
+      }
+      .nav-links a {
+        transition: color 0.15s ease, transform 0.15s ease;
+      }
+      .nav-links a:hover { transform: translateY(-1px); }
+      .foot-links a {
+        transition: color 0.15s ease, transform 0.15s ease;
+      }
+      .foot-links a:hover { transform: translateY(-1px); }
+      .vf-step {
+        transition: transform 0.15s ease;
+      }
+      .vf-step:hover { transform: translateX(2px); }
+      .sess-step {
+        transition: transform 0.15s ease;
+      }
+      .btn {
+        transition: all 0.2s ease;
+      }
+      .btn:active { transform: translateY(1px); }
+      .foot-wordmark {
+        transition: opacity 0.3s ease;
+      }
+      .foot-wordmark:hover { opacity: 0.8; }
+      .nav-logo {
+        transition: opacity 0.15s ease;
+      }
+      .nav-logo:hover { opacity: 0.8; }
+    }
+
     /* ── Nav ── */
     nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      padding: 0.9rem 2rem;
+      padding: 1.1rem 2rem;
       display: flex; align-items: center; justify-content: space-between;
       background: rgba(8, 8, 11, 0.85);
       backdrop-filter: blur(20px);
       border-bottom: 1px solid var(--border);
     }
     .nav-logo {
-      font-family: var(--mono); font-size: 1rem; font-weight: 600;
+      font-family: var(--mono); font-size: 1.6rem; font-weight: 700;
       color: var(--text); text-decoration: none; letter-spacing: -0.03em;
     }
     .nav-logo em { font-style: normal; color: var(--accent); }
@@ -85,12 +145,20 @@
     .w { max-width: 1060px; margin: 0 auto; padding: 0 2rem; }
 
     /* ── Hero ── */
+    .hero-wrap { position: relative; overflow: hidden; }
+    .hero-ascii {
+      position: fixed; inset: 0; z-index: 0;
+      pointer-events: none; user-select: none;
+    }
+    .hero-ascii canvas { width: 100%; height: 100%; }
+    .hero-ascii { opacity: 0.12; }
     .hero {
-      padding: 11rem 0 4rem;
+      padding: 12rem 0 6rem;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 4rem;
+      gap: 4.5rem;
       align-items: center;
+      position: relative; z-index: 1;
     }
     .hero-text { position: relative; }
     .hero-tag {
@@ -162,51 +230,148 @@
     @keyframes blink { 50% { opacity: 0; } }
 
     /* ── Section ── */
-    section { padding: 5.5rem 0; }
+    section { padding: 7rem 0; }
     .s-border { border-top: 1px solid var(--border); }
     .s-label {
       font-family: var(--mono); font-size: 0.7rem; font-weight: 500;
       text-transform: uppercase; letter-spacing: 0.12em;
-      color: var(--accent); margin-bottom: 0.75rem;
+      color: var(--accent); margin-bottom: 1rem;
     }
     .s-title {
       font-family: var(--display); font-size: 2.4rem; font-weight: 800;
-      letter-spacing: -0.02em; margin-bottom: 0.75rem; line-height: 1.15;
+      letter-spacing: -0.02em; margin-bottom: 1.5rem; line-height: 1.15;
     }
     .s-desc {
       font-size: 0.98rem; color: var(--text-2); max-width: 520px;
-      line-height: 1.65; margin-bottom: 2.5rem;
+      line-height: 1.65; margin-bottom: 3rem;
     }
 
     /* ── Why Shielded ── */
     .why-grid {
-      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem;
     }
     .why-card {
-      padding: 1.5rem; border-radius: 10px;
+      padding: 1.75rem; border-radius: 10px;
       border: 1px solid var(--border); background: var(--bg-card);
+      position: relative; overflow: hidden;
     }
     .why-card h3 {
       font-size: 0.88rem; font-weight: 600; margin-bottom: 0.5rem;
       display: flex; align-items: center; gap: 0.5rem;
+      position: relative; z-index: 1;
     }
-    .why-card p { font-size: 0.82rem; color: var(--text-2); line-height: 1.55; }
+    .why-card p { font-size: 0.82rem; color: var(--text-2); line-height: 1.55; position: relative; z-index: 1; }
     .why-icon { flex-shrink: 0; }
 
     /* ── Comparison ── */
     .compare {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;
-      margin-top: 2rem;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+      margin-top: 2.5rem;
     }
     .cmp-card {
       padding: 1.5rem; border-radius: 10px; border: 1px solid var(--border);
-      background: var(--bg-card);
+      background: var(--bg-card); position: relative; overflow: hidden;
     }
     .cmp-card.priv {
       border-color: rgba(167,139,250,0.18);
       background: linear-gradient(145deg, var(--bg-card), rgba(167,139,250,0.02));
     }
     .cmp-card.pub { opacity: 0.55; }
+
+
+    /* V1: Gradient glow border */
+    @property --angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+    @keyframes rotateGlow { to { --angle: 360deg; } }
+    .v1 .why-card, .v1 .cmp-card {
+      border: 1px solid transparent;
+      background: var(--bg-card);
+      background-clip: padding-box;
+    }
+    .v1 .why-card::before, .v1 .cmp-card.priv::before {
+      content: ''; position: absolute; inset: -1px; z-index: 0;
+      border-radius: 11px;
+      background: conic-gradient(from var(--angle), var(--accent), var(--cyan), var(--green), var(--accent));
+      animation: rotateGlow 4s linear infinite;
+      opacity: 0.3;
+    }
+    .v1 .why-card::after, .v1 .cmp-card.priv::after {
+      content: ''; position: absolute; inset: 1px; z-index: 0;
+      border-radius: 9px; background: var(--bg-card);
+    }
+    .v1 .why-card:hover::before, .v1 .cmp-card.priv:hover::before { opacity: 0.6; }
+    .v1 .why-card h3, .v1 .why-card p, .v1 .cmp-head, .v1 .cmp-row { position: relative; z-index: 1; }
+
+    /* V2: Glass morphism */
+    .v2 .why-card, .v2 .cmp-card {
+      background: rgba(15, 15, 20, 0.6);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .v2 .why-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+    }
+    .v2 .why-card:hover, .v2 .cmp-card:hover {
+      background: rgba(15, 15, 20, 0.75);
+      border-color: rgba(255,255,255,0.1);
+    }
+    .v2 .cmp-card.priv { border-color: rgba(167,139,250,0.15); }
+    .v2 .cmp-card.priv::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0.4;
+    }
+
+    /* V3: Accent line + number */
+    .v3 .why-card { padding-top: 2.25rem; }
+    .v3 .why-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--cyan));
+    }
+    .v3 .why-card::after {
+      content: attr(data-num); position: absolute; top: 0.75rem; right: 1rem;
+      font-family: var(--mono); font-size: 3rem; font-weight: 800;
+      color: rgba(255,255,255,0.03); line-height: 1; z-index: 0;
+    }
+    .v3 .cmp-card.pub::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--red); opacity: 0.5;
+    }
+    .v3 .cmp-card.priv::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--green);
+    }
+
+    /* V4: Icon glow pulse */
+    @keyframes iconPulse { 0%, 100% { filter: drop-shadow(0 0 4px var(--accent)); } 50% { filter: drop-shadow(0 0 12px var(--accent)); } }
+    .v4 .why-icon { animation: iconPulse 3s ease-in-out infinite; }
+    .v4 .why-card {
+      background: linear-gradient(135deg, var(--bg-card), rgba(167,139,250,0.02));
+    }
+    .v4 .why-card:hover {
+      background: linear-gradient(135deg, var(--bg-card), rgba(167,139,250,0.06));
+    }
+    .v4 .cmp-card.priv {
+      box-shadow: 0 0 20px rgba(167,139,250,0.08);
+    }
+    .v4 .cmp-card.priv:hover {
+      box-shadow: 0 0 30px rgba(167,139,250,0.15);
+    }
+
+    /* V5: Dotted grid background */
+    .v5 .why-card::before, .v5 .cmp-card::before {
+      content: ''; position: absolute; inset: 0; z-index: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px);
+      background-size: 16px 16px;
+      opacity: 0.5; transition: opacity 0.3s;
+    }
+    .v5 .why-card:hover::before, .v5 .cmp-card:hover::before { opacity: 1; }
+    .v5 .cmp-card.priv::before {
+      background-image: radial-gradient(rgba(110,231,183,0.12) 1px, transparent 1px);
+    }
+    .v5 .cmp-card.pub::before {
+      background-image: radial-gradient(rgba(248,113,113,0.1) 1px, transparent 1px);
+    }
     .cmp-head {
       font-size: 0.85rem; font-weight: 600; margin-bottom: 1rem;
       display: flex; align-items: center; gap: 0.5rem;
@@ -229,7 +394,7 @@
 
     /* ── Integrate ── */
     .int-grid {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1.75rem;
     }
     .int-card {
       border-radius: 10px; border: 1px solid var(--border);
@@ -489,7 +654,7 @@
       display: grid; grid-template-columns: 1fr 1fr; gap: 3rem;
       align-items: start;
     }
-    .cli-cmds { display: flex; flex-direction: column; gap: 1.5rem; }
+    .cli-cmds { display: flex; flex-direction: column; gap: 1.75rem; }
     .cli-cmd h3 {
       font-size: 0.88rem; font-weight: 600; margin-bottom: 0.3rem;
     }
@@ -505,16 +670,32 @@
 
     /* ── Footer ── */
     footer {
-      border-top: 1px solid var(--border); padding: 2.5rem 0 2rem;
+      border-top: 1px solid var(--border); padding: 8rem 0 3rem;
+      position: relative; overflow: hidden;
     }
+    .foot-ascii {
+      position: absolute; inset: 0; z-index: 0;
+      font-family: var(--mono); font-size: 0.7rem; line-height: 1.8;
+      letter-spacing: 0.3em; color: rgba(255,255,255,0.03);
+      white-space: pre; overflow: hidden; pointer-events: none;
+      user-select: none;
+    }
+    footer .w { position: relative; z-index: 1; }
+    .foot-wordmark {
+      font-family: var(--mono); font-size: clamp(6rem, 18vw, 16rem);
+      font-weight: 800; letter-spacing: -0.05em;
+      color: rgba(255,255,255,0.06); text-align: center;
+      line-height: 0.9; margin-bottom: 4rem; padding: 2rem 0;
+      user-select: none;
+    }
+    .foot-wordmark em { font-style: normal; color: var(--accent); opacity: 0.15; }
     .foot-inner {
-      display: flex; justify-content: space-between; align-items: flex-start;
+      display: flex; justify-content: space-between; align-items: flex-end;
       flex-wrap: wrap; gap: 1.5rem;
     }
     .foot-l {
       font-family: var(--mono); font-size: 0.75rem; color: var(--text-3);
     }
-    .foot-l em { font-style: normal; color: var(--accent); }
     .foot-credit {
       font-family: var(--mono); font-size: 0.7rem; color: var(--text-3);
       margin-top: 0.5rem;
@@ -546,12 +727,12 @@
 <body>
 
 <nav>
-  <a href="https://zimppy.xyz" class="nav-logo"><em>z</em>imppy<span style="color:var(--text-3)">.xyz</span></a>
+  <a href="https://zimppy.xyz" class="nav-logo">zi<em>mpp</em>y<span style="color:var(--text-3)">.xyz</span></a>
   <ul class="nav-links">
     <li><a href="#why">Why Shielded</a></li>
     <li><a href="#how-it-works">How It Works</a></li>
     <li><a href="#integrate">Integrate</a></li>
-    <li><a href="#sessions">Sessions</a></li>
+    <li><a href="#sessions">Sessions & Streaming</a></li>
     <li><a href="#cli">CLI</a></li>
     <li><a href="https://mpp.dev" target="_blank">MPP Spec</a></li>
   </ul>
@@ -562,15 +743,14 @@
 </nav>
 
 <!-- HERO -->
+<div class="hero-wrap">
+<div class="hero-ascii"><canvas id="hero-canvas"></canvas></div>
 <div class="w">
   <section class="hero">
     <div class="hero-text">
-      <div class="hero-tag">Zcash payment method for MPP</div>
       <h1>Agents pay.<br><span>No one sees.</span></h1>
       <p class="hero-sub">
-        The private payment method for the Machine Payments Protocol.
-        Zcash Orchard shielded transactions &mdash; encrypted sender,
-        receiver, amount, and memo.
+        The Zcash payment method for the Machine Payments Protocol. Shielded by default.
       </p>
       <div class="hero-btns">
         <a href="#integrate" class="btn btn-p">Get Started</a>
@@ -588,29 +768,28 @@
     </div>
   </section>
 </div>
+</div>
 
 <!-- WHY SHIELDED -->
-<div class="w">
+<div class="w" id="sec-why">
   <section id="why" class="s-border">
-    <div class="s-label">Why shielded payments</div>
-    <div class="s-title">Agents leak payment data</div>
+    <div class="s-label">Why shielded</div>
+    <div class="s-title">Public payments are a liability</div>
     <p class="s-desc">
-      When AI agents pay on public chains, every transaction reveals
-      who called what API, how often, and how much they spent.
-      That's a competitive intelligence goldmine. Zcash fixes this.
+      Every on-chain transaction is competitive intelligence. Zcash encrypts all of it.
     </p>
     <div class="why-grid">
-      <div class="why-card">
+      <div class="why-card" data-num="01">
         <h3><svg class="why-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Usage fingerprinting</h3>
-        <p>Public payments let competitors see exactly which APIs your agent uses, how frequently, and spending patterns.</p>
+        <p>Which APIs, how often, how much. All visible on public chains.</p>
       </div>
-      <div class="why-card">
+      <div class="why-card" data-num="02">
         <h3><svg class="why-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> Price discrimination</h3>
-        <p>When services can see your total spend across APIs, they can adjust pricing based on your usage profile.</p>
+        <p>Visible spend lets services price against your profile.</p>
       </div>
-      <div class="why-card">
+      <div class="why-card" data-num="03">
         <h3><svg class="why-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Encrypted verification</h3>
-        <p>Servers verify payments using an Orchard incoming viewing key. Only the recipient can decrypt and confirm &mdash; no one else.</p>
+        <p>Orchard viewing key verification. Only the recipient sees the payment.</p>
       </div>
     </div>
     <div class="compare">
@@ -632,120 +811,15 @@
   </section>
 </div>
 
-<!-- INTEGRATE -->
-<div class="w">
-  <section id="integrate" class="s-border">
-    <div class="s-label">Integrate</div>
-    <div class="s-title">TypeScript or Rust. Same MPP spec.</div>
-    <div class="int-grid">
-      <!-- Server -->
-      <div class="int-card">
-        <div class="int-head">
-          <h3>Server</h3>
-        </div>
-        <div class="tab-bar">
-          <button class="tab-btn active" onclick="switchTab(this, 'srv-ts')">TypeScript</button>
-          <button class="tab-btn" onclick="switchTab(this, 'srv-rs')">Rust</button>
-        </div>
-        <div id="srv-ts" class="tab-panel active">
-          <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/server'</span>
-<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
-
-<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
-  methods: [<span class="kw">await</span> <span class="fn">zcash</span>({ wallet: <span class="str">'server'</span> })],
-})
-
-<span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">charge</span>({
-  amount: <span class="str">'42000'</span>,
-  currency: <span class="str">'zec'</span>,
-})(request)
-
-<span class="kw">if</span> (result.status === <span class="num">402</span>) <span class="kw">return</span> result.challenge
-<span class="kw">return</span> result.<span class="fn">withReceipt</span>(Response.<span class="fn">json</span>({ data }))</pre></div>
-        </div>
-        <div id="srv-rs" class="tab-panel">
-          <div class="int-code"><pre><span class="kw">use</span> mpp::server::axum::*;
-<span class="kw">use</span> mpp::server::Mpp;
-<span class="kw">use</span> zimppy_rs::ZcashChargeMethod;
-
-<span class="kw">struct</span> FortunePrice;
-<span class="kw">impl</span> ChargeConfig <span class="kw">for</span> FortunePrice {
-  <span class="kw">fn</span> <span class="fn">amount</span>() -> &<span class="str">'static str</span> { <span class="str">"42000"</span> }
-}
-
-<span class="kw">let</span> mpp = Mpp::<span class="fn">create</span>(ZcashChargeMethod::<span class="fn">new</span>(
-  &rpc, &address, &orchard_ivk,
-))?;
-<span class="kw">let</span> state: Arc&lt;<span class="kw">dyn</span> ChargeChallenger&gt; =
-  Arc::<span class="fn">new</span>(mpp);
-
-<span class="kw">let</span> app = Router::<span class="fn">new</span>()
-  .<span class="fn">route</span>(<span class="str">"/api/fortune"</span>, <span class="fn">get</span>(fortune))
-  .<span class="fn">with_state</span>(state);
-
-<span class="kw">async fn</span> <span class="fn">fortune</span>(
-  charge: MppCharge&lt;FortunePrice&gt;,
-) -> WithReceipt&lt;Json&lt;Value&gt;&gt; {
-  WithReceipt {
-    receipt: charge.receipt,
-    body: Json(<span class="fn">json!</span>({ <span class="str">"fortune"</span>: <span class="fn">pick</span>() })),
-  }
-}</pre></div>
-        </div>
-      </div>
-      <!-- Client -->
-      <div class="int-card">
-        <div class="int-head">
-          <h3>Client</h3>
-        </div>
-        <div class="tab-bar">
-          <button class="tab-btn active" onclick="switchTab(this, 'cli-ts')">TypeScript</button>
-          <button class="tab-btn" onclick="switchTab(this, 'cli-rs')">Rust</button>
-        </div>
-        <div id="cli-ts" class="tab-panel active">
-          <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
-<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
-
-<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
-  methods: [<span class="fn">zcash</span>({ wallet: <span class="str">'default'</span> })],
-})
-
-<span class="cm">// 402 → pay → retry handled automatically</span>
-<span class="kw">const</span> res = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(<span class="str">'https://api.example.com/fortune'</span>)
-console.<span class="fn">log</span>(<span class="kw">await</span> res.<span class="fn">json</span>())</pre></div>
-        </div>
-        <div id="cli-rs" class="tab-panel">
-          <div class="int-code"><pre><span class="kw">use</span> mpp::client::Fetch;
-<span class="kw">use</span> zimppy_rs::ZcashPaymentProvider;
-
-<span class="kw">let</span> provider = ZcashPaymentProvider::<span class="fn">new</span>(
-  wallet_config, &rpc_endpoint,
-);
-
-<span class="cm">// 402 → pay → retry handled automatically</span>
-<span class="kw">let</span> resp = client
-  .<span class="fn">get</span>(<span class="str">"https://api.example.com/fortune"</span>)
-  .<span class="fn">send_with_payment</span>(&provider)
-  .<span class="kw">await</span>?;
-
-<span class="kw">let</span> fortune = resp.<span class="fn">json</span>::&lt;Fortune&gt;().<span class="kw">await</span>?;</pre></div>
-        </div>
-      </div>
-    </div>
-  </section>
-</div>
-
 <!-- HOW IT WORKS -->
-<div class="w">
+<div class="w" id="sec-how">
   <section id="how-it-works" class="s-border">
     <div class="vf-layout">
       <div class="vf-info">
         <div class="s-label">How it works</div>
-        <div class="s-title">Standard HTTP 402,<br>shielded underneath</div>
+        <div class="s-title">HTTP 402. Shielded underneath.</div>
         <p class="s-desc" style="margin-bottom:1.5rem;">
-          Same MPP flow every agent already speaks. The server returns a
-          402 challenge, the agent pays with shielded ZEC, retries with proof,
-          and gets the response. One HTTP round-trip, fully private.
+          Standard MPP. 402 challenge, shielded payment, retry with proof.
         </p>
         <div class="vf-highlights">
           <div class="vf-hl">
@@ -848,14 +922,116 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
   </section>
 </div>
 
+<!-- INTEGRATE -->
+<div class="w" id="sec-integrate">
+  <section id="integrate" class="s-border">
+    <div class="s-label">Integrate</div>
+    <div class="s-title">TypeScript or Rust. Same spec.</div>
+    <div class="int-grid">
+      <!-- Server -->
+      <div class="int-card">
+        <div class="int-head">
+          <h3>Server</h3>
+        </div>
+        <div class="tab-bar">
+          <button class="tab-btn active" onclick="switchTab(this, 'srv-ts')">TypeScript</button>
+          <button class="tab-btn" onclick="switchTab(this, 'srv-rs')">Rust</button>
+        </div>
+        <div id="srv-ts" class="tab-panel active">
+          <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/server'</span>
+<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
+
+<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
+  methods: [<span class="kw">await</span> <span class="fn">zcash</span>({ wallet: <span class="str">'server'</span> })],
+})
+
+<span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">charge</span>({
+  amount: <span class="str">'42000'</span>,
+  currency: <span class="str">'zec'</span>,
+})(request)
+
+<span class="kw">if</span> (result.status === <span class="num">402</span>) <span class="kw">return</span> result.challenge
+<span class="kw">return</span> result.<span class="fn">withReceipt</span>(Response.<span class="fn">json</span>({ data }))</pre></div>
+        </div>
+        <div id="srv-rs" class="tab-panel">
+          <div class="int-code"><pre><span class="kw">use</span> mpp::server::axum::*;
+<span class="kw">use</span> mpp::server::Mpp;
+<span class="kw">use</span> zimppy_rs::ZcashChargeMethod;
+
+<span class="kw">struct</span> FortunePrice;
+<span class="kw">impl</span> ChargeConfig <span class="kw">for</span> FortunePrice {
+  <span class="kw">fn</span> <span class="fn">amount</span>() -> &<span class="str">'static str</span> { <span class="str">"42000"</span> }
+}
+
+<span class="kw">let</span> mpp = Mpp::<span class="fn">create</span>(ZcashChargeMethod::<span class="fn">new</span>(
+  &rpc, &address, &orchard_ivk,
+))?;
+<span class="kw">let</span> state: Arc&lt;<span class="kw">dyn</span> ChargeChallenger&gt; =
+  Arc::<span class="fn">new</span>(mpp);
+
+<span class="kw">let</span> app = Router::<span class="fn">new</span>()
+  .<span class="fn">route</span>(<span class="str">"/api/fortune"</span>, <span class="fn">get</span>(fortune))
+  .<span class="fn">with_state</span>(state);
+
+<span class="kw">async fn</span> <span class="fn">fortune</span>(
+  charge: MppCharge&lt;FortunePrice&gt;,
+) -> WithReceipt&lt;Json&lt;Value&gt;&gt; {
+  WithReceipt {
+    receipt: charge.receipt,
+    body: Json(<span class="fn">json!</span>({ <span class="str">"fortune"</span>: <span class="fn">pick</span>() })),
+  }
+}</pre></div>
+        </div>
+      </div>
+      <!-- Client -->
+      <div class="int-card">
+        <div class="int-head">
+          <h3>Client</h3>
+        </div>
+        <div class="tab-bar">
+          <button class="tab-btn active" onclick="switchTab(this, 'cli-ts')">TypeScript</button>
+          <button class="tab-btn" onclick="switchTab(this, 'cli-rs')">Rust</button>
+        </div>
+        <div id="cli-ts" class="tab-panel active">
+          <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
+<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
+
+<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
+  methods: [<span class="fn">zcash</span>({ wallet: <span class="str">'default'</span> })],
+})
+
+<span class="cm">// 402 → pay → retry handled automatically</span>
+<span class="kw">const</span> res = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(<span class="str">'https://api.example.com/fortune'</span>)
+console.<span class="fn">log</span>(<span class="kw">await</span> res.<span class="fn">json</span>())</pre></div>
+        </div>
+        <div id="cli-rs" class="tab-panel">
+          <div class="int-code"><pre><span class="kw">use</span> mpp::client::Fetch;
+<span class="kw">use</span> zimppy_rs::ZcashPaymentProvider;
+
+<span class="kw">let</span> provider = ZcashPaymentProvider::<span class="fn">new</span>(
+  wallet_config, &rpc_endpoint,
+);
+
+<span class="cm">// 402 → pay → retry handled automatically</span>
+<span class="kw">let</span> resp = client
+  .<span class="fn">get</span>(<span class="str">"https://api.example.com/fortune"</span>)
+  .<span class="fn">send_with_payment</span>(&provider)
+  .<span class="kw">await</span>?;
+
+<span class="kw">let</span> fortune = resp.<span class="fn">json</span>::&lt;Fortune&gt;().<span class="kw">await</span>?;</pre></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
 <!-- SESSIONS -->
-<div class="w">
+<div class="w" id="sec-sessions">
   <section id="sessions" class="s-border">
-    <div class="s-label">Sessions</div>
-    <div class="s-title">Deposit once, instant bearer requests</div>
+    <div class="s-label">Sessions & Streaming</div>
+    <div class="s-title">Pay-as-you-go streaming over a single shielded session</div>
     <div class="sess-demo">
       <div class="sess-unified">
-        <!-- Step markers -->
         <div id="sess-steps" class="sess-steps">
           <div class="sess-step" data-s="open"><span class="sess-step-dot"></span><div><div class="sess-step-name">1. Open</div><div class="sess-step-desc">Shielded deposit</div></div></div>
           <div class="sess-step" data-s="query"><span class="sess-step-dot"></span><div><div class="sess-step-name">2. Query</div><div class="sess-step-desc">Stream results</div></div></div>
@@ -863,8 +1039,6 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
           <div class="sess-step" data-s="query2"><span class="sess-step-dot"></span><div><div class="sess-step-name">4. Query</div><div class="sess-step-desc">Stream results</div></div></div>
           <div class="sess-step" data-s="close"><span class="sess-step-dot"></span><div><div class="sess-step-name">5. Close</div><div class="sess-step-desc">Refund balance</div></div></div>
         </div>
-
-        <!-- Balance -->
         <div class="sess-balance-row">
           <div id="sess-bal" class="sess-bal-amount">0 zat</div>
           <div class="sess-bal-right">
@@ -872,16 +1046,10 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
             <div id="sess-token-cost" class="sess-token-cost"></div>
           </div>
         </div>
-
         <div class="sess-divider"></div>
-
-        <!-- Event log -->
         <div class="sess-section-title">Event log</div>
         <div id="sess-log" class="sess-log"></div>
-
         <div class="sess-divider"></div>
-
-        <!-- Query output -->
         <div class="sess-section-title">Query output</div>
         <div id="sess-stream-label" class="sess-stream-label"></div>
         <div id="sess-stream" class="sess-stream-scroll"></div>
@@ -892,7 +1060,7 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
 </div>
 
 <!-- CLI -->
-<div class="w">
+<div class="w" id="sec-cli">
   <section id="cli" class="s-border">
     <div class="s-label">CLI</div>
     <div class="s-title">npx zimppy</div>
@@ -901,22 +1069,22 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
       <div class="cli-cmds">
         <div class="cli-cmd">
           <h3>Wallet identity</h3>
-          <p>Shielded address, balance, network status. Ready for agents.</p>
+          <p>Address, balance, network status.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet whoami</span></div>
         </div>
         <div class="cli-cmd">
           <h3>MPP charge + session</h3>
-          <p>Auto-discovers 402 pricing, handles charge or session flow, retries with credential.</p>
+          <p>402 discovery, payment, retry. Charge or session.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy request https://fortune.api.dev/fortune</span></div>
         </div>
         <div class="cli-cmd">
           <h3>Shielded transfers</h3>
-          <p>Send ZEC with full shielded privacy. Sender, receiver, amount all encrypted.</p>
+          <p>Fully shielded. Nothing exposed on-chain.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet send &lt;addr&gt; 42000</span></div>
         </div>
         <div class="cli-cmd">
           <h3>Multi-agent wallets</h3>
-          <p>Isolated identities per agent, environment, or task. Switch in one command.</p>
+          <p>Isolated identities per agent or environment.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet use work</span></div>
         </div>
       </div>
@@ -954,10 +1122,12 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
 
 <!-- FOOTER -->
 <footer>
+  <div class="foot-ascii" id="foot-ascii"></div>
   <div class="w">
+    <div class="foot-wordmark">zi<em>mpp</em>y</div>
     <div class="foot-inner">
       <div>
-        <div class="foot-l"><em>zimppy</em> &mdash; private machine payments on Zcash</div>
+        <div class="foot-l">Private machine payments on Zcash</div>
         <div class="foot-credit">MIT License &middot; Made with <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--red)" style="vertical-align:-1px"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg> by <a href="https://github.com/betterclever" target="_blank"><svg width="18" height="18" viewBox="0 0 14 14" style="vertical-align:-4px" shape-rendering="crispEdges"><rect x="3" y="0" width="8" height="2" fill="#333"/><rect x="1" y="2" width="12" height="2" fill="#333"/><rect x="0" y="4" width="14" height="2" fill="#333"/><rect x="4" y="4" width="2" height="2" fill="#fff"/><rect x="8" y="4" width="2" height="2" fill="#fff"/><rect x="2" y="6" width="10" height="2" fill="#333"/><rect x="3" y="8" width="8" height="2" fill="#555"/><rect x="4" y="10" width="2" height="4" fill="#333"/><rect x="8" y="10" width="2" height="4" fill="#333"/></svg> betterclever</a> and <a href="https://claude.ai" target="_blank"><svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px" fill="currentColor"><path d="m3.127 10.604 3.135-1.76.053-.153-.053-.085H6.11l-.525-.032-1.791-.048-1.554-.065-1.505-.08-.38-.081L0 7.832l.036-.234.32-.214.455.04 1.009.069 1.513.105 1.097.064 1.626.17h.259l.036-.105-.089-.065-.068-.064-1.566-1.062-1.695-1.121-.887-.646-.48-.327-.243-.306-.104-.67.435-.48.585.04.15.04.593.456 1.267.981 1.654 1.218.242.202.097-.068.012-.049-.109-.181-.9-1.626-.96-1.655-.428-.686-.113-.411a2 2 0 0 1-.068-.484l.496-.674L4.446 0l.662.089.279.242.411.94.666 1.48 1.033 2.014.302.597.162.553.06.17h.105v-.097l.085-1.134.157-1.392.154-1.792.052-.504.25-.605.497-.327.387.186.319.456-.045.294-.19 1.23-.37 1.93-.243 1.29h.142l.161-.16.654-.868 1.097-1.372.484-.545.565-.601.363-.287h.686l.505.751-.226.775-.707.895-.585.759-.839 1.13-.524.904.048.072.125-.012 1.897-.403 1.024-.186 1.223-.21.553.258.06.263-.218.536-1.307.323-1.533.307-2.284.54-.028.02.032.04 1.029.098.44.024h1.077l2.005.15.525.346.315.424-.053.323-.807.411-3.631-.863-.872-.218h-.12v.073l.726.71 1.331 1.202 1.667 1.55.084.383-.214.302-.226-.032-1.464-1.101-.565-.497-1.28-1.077h-.084v.113l.295.432 1.557 2.34.08.718-.112.234-.404.141-.444-.08-.911-1.28-.94-1.44-.759-1.291-.093.053-.448 4.821-.21.246-.484.186-.403-.307-.214-.496.214-.98.258-1.28.21-1.016.19-1.263.112-.42-.008-.028-.092.012-.953 1.307-1.448 1.957-1.146 1.227-.274.109-.477-.247.045-.44.266-.39 1.586-2.018.956-1.25.617-.723-.004-.105h-.036l-4.212 2.736-.75.096-.324-.302.04-.496.154-.162 1.267-.871z"/></svg> Claude</a></div>
       </div>
       <ul class="foot-links">
@@ -968,6 +1138,7 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
     </div>
   </div>
 </footer>
+
 
 <script>
 // Tab switching
@@ -1388,6 +1559,188 @@ const sessObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.3 });
 const sessEl = document.querySelector('.sess-demo');
 if (sessEl) sessObserver.observe(sessEl);
+
+// ── Hero ASCII canvas ──
+(function() {
+  const canvas = document.getElementById('hero-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  const charSet = 'zimppy·:;=+*#%@░▒▓█'.split('');
+  const glitchChars = '!@#$%^&*(){}[]|/\\<>~`01'.split('');
+  const cellW = 12, cellH = 18;
+  let cols, rows, grid, glitchGrid;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols = Math.ceil(canvas.width / cellW);
+    rows = Math.ceil(canvas.height / cellH);
+    grid = new Array(cols * rows);
+    glitchGrid = new Float32Array(cols * rows);
+
+    // Draw the Zcash shield shape as a mask
+    const offscreen = document.createElement('canvas');
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    const offCtx = offscreen.getContext('2d');
+
+    // Draw Zcash circle logo — centered, full page
+    const cx = canvas.width * 0.5, cy = canvas.height * 0.5;
+    const r = Math.min(canvas.width, canvas.height) * 0.38;
+
+    // Outer circle
+    offCtx.beginPath();
+    offCtx.arc(cx, cy, r, 0, Math.PI * 2);
+    offCtx.fillStyle = '#fff';
+    offCtx.fill();
+
+    // Cut out inner circle to make ring
+    offCtx.globalCompositeOperation = 'destination-out';
+    offCtx.beginPath();
+    offCtx.arc(cx, cy, r * 0.82, 0, Math.PI * 2);
+    offCtx.fill();
+
+    // Draw the Zcash Z with bars inside
+    offCtx.globalCompositeOperation = 'source-over';
+    offCtx.fillStyle = '#fff';
+    const zw = r * 0.5; // half-width of Z
+    const zh = r * 0.55; // half-height of Z
+    const bar = r * 0.1; // bar thickness
+    const smallBar = r * 0.15; // small vertical bar above/below
+
+    // Top horizontal bar of Z
+    offCtx.fillRect(cx - zw, cy - zh, zw * 2, bar);
+    // Bottom horizontal bar of Z
+    offCtx.fillRect(cx - zw, cy + zh - bar, zw * 2, bar);
+    // Diagonal of Z — BOLD
+    const diagW = bar * 2.5;
+    offCtx.beginPath();
+    offCtx.moveTo(cx + zw, cy - zh + bar);
+    offCtx.lineTo(cx + zw - diagW, cy - zh + bar);
+    offCtx.lineTo(cx - zw, cy + zh - bar);
+    offCtx.lineTo(cx - zw + diagW, cy + zh - bar);
+    offCtx.closePath();
+    offCtx.fill();
+
+    // Small vertical bar above Z (like Zcash logo)
+    offCtx.fillRect(cx - bar * 0.5, cy - zh - smallBar, bar, smallBar);
+    // Small vertical bar below Z
+    offCtx.fillRect(cx - bar * 0.5, cy + zh, bar, smallBar);
+
+    // Sample the offscreen canvas to build the character grid
+    const imgData = offCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const px = Math.floor(c * cellW + cellW / 2);
+        const py = Math.floor(r * cellH + cellH / 2);
+        const idx = (py * canvas.width + px) * 4;
+        const alpha = imgData[idx + 3] || 0;
+        const i = r * cols + c;
+        if (alpha > 128) {
+          // Inside shape — use structured characters
+          grid[i] = charSet[Math.floor(Math.random() * charSet.length)];
+        } else {
+          // Outside — sparse dots
+          grid[i] = Math.random() < 0.06 ? '·' : ' ';
+        }
+        glitchGrid[i] = 0;
+      }
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = `${cellH - 4}px ${getComputedStyle(document.body).getPropertyValue('--mono')}`;
+    ctx.textBaseline = 'top';
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
+        const ch = grid[i];
+        if (ch === ' ') continue;
+
+        const x = c * cellW;
+        const y = r * cellH;
+
+        if (glitchGrid[i] > 0) {
+          // Glitching — bright purple flash
+          ctx.fillStyle = `rgba(167, 139, 250, ${0.4 + glitchGrid[i] * 0.6})`;
+          ctx.fillText(glitchChars[Math.floor(Math.random() * glitchChars.length)], x, y);
+          glitchGrid[i] -= 0.04;
+        } else {
+          ctx.fillStyle = ch === '·' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,1)';
+          ctx.fillText(ch, x, y);
+        }
+      }
+    }
+  }
+
+  function tick() {
+    // Randomly glitch characters
+    for (let k = 0; k < 8; k++) {
+      const i = Math.floor(Math.random() * cols * rows);
+      if (grid[i] !== ' ') {
+        glitchGrid[i] = 1;
+      }
+    }
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  resize();
+  tick();
+  window.addEventListener('resize', () => { resize(); draw(); });
+
+  // Fade out on scroll
+  const asciiEl = canvas.parentElement;
+  window.addEventListener('scroll', () => {
+    const scrollY = window.scrollY;
+    const fadeEnd = window.innerHeight * 0.8;
+    const opacity = Math.max(0, 1 - scrollY / fadeEnd) * 0.12;
+    asciiEl.style.opacity = opacity;
+  }, { passive: true });
+})();
+
+// ── Footer ASCII grid ──
+(function() {
+  const el = document.getElementById('foot-ascii');
+  if (!el) return;
+  const word = 'zimppy';
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789!@#$%&*';
+  const cols = Math.ceil(window.innerWidth / 12);
+  const rows = Math.ceil(el.parentElement.offsetHeight / 22) + 4;
+  const total = cols * rows;
+  const grid = [];
+
+  // Fill grid with repeating "zimppy " with spacing
+  const pattern = word + '  ';
+  for (let i = 0; i < total; i++) {
+    grid.push(pattern[i % pattern.length]);
+  }
+
+  function render() {
+    let out = '';
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        out += grid[r * cols + c];
+      }
+      out += '\n';
+    }
+    el.textContent = out;
+  }
+
+  render();
+
+  // Randomly mutate characters, then restore them
+  setInterval(() => {
+    const idx = Math.floor(Math.random() * total);
+    const original = pattern[idx % pattern.length];
+    grid[idx] = chars[Math.floor(Math.random() * chars.length)];
+    render();
+    setTimeout(() => { grid[idx] = original; render(); }, 150 + Math.random() * 300);
+  }, 50);
+})();
 </script>
 
 </body>
