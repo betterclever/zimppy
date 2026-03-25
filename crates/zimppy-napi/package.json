@@ -12,6 +12,9 @@
     "index.*.node",
     "zimppy-core.*.node"
   ],
+  "scripts": {
+    "build": "cargo build --release -p zimppy-napi && cp ../../target/release/libzimppy_napi.dylib zimppy-core.darwin-arm64.node"
+  },
   "napi": {
     "binaryName": "zimppy-core",
     "targets": [
