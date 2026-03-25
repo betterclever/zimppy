@@ -17,6 +17,7 @@ use zingolib::grpc_connector;
 use zingolib::lightclient::error::LightClientError;
 use zingolib::lightclient::LightClient;
 use zingolib::wallet::{LightWallet, WalletBase};
+use shardtree::store::ShardStore as _;
 
 pub use config::WalletConfig;
 pub use error::WalletError;
@@ -293,6 +294,28 @@ impl ZimppyWallet {
         let request = transaction_request_from_receivers(receivers)
             .map_err(|e| WalletError::Send(format!("request error: {e}")))?;
 
+        // Debug: log checkpoint state before send
+        {
+            let wallet = self.client.wallet.read().await;
+            let sapling_store = wallet.shard_trees.sapling.store();
+            let orchard_store = wallet.shard_trees.orchard.store();
+            let s_count = sapling_store.checkpoint_count().unwrap_or(0);
+            let o_count = orchard_store.checkpoint_count().unwrap_or(0);
+            let s_max = sapling_store.max_checkpoint_id().ok().flatten();
+            let o_max = orchard_store.max_checkpoint_id().ok().flatten();
+            let s_min = sapling_store.min_checkpoint_id().ok().flatten();
+            let o_min = orchard_store.min_checkpoint_id().ok().flatten();
+            let min_conf = wallet.wallet_settings.min_confirmations;
+            let chain_h = wallet.sync_state.last_known_chain_height();
+            trace_wallet(
+                "send:checkpoints",
+                format!(
+                    "sapling=[{:?}..{:?}](count={}) orchard=[{:?}..{:?}](count={}) min_conf={} chain_height={:?}",
+                    s_min, s_max, s_count, o_min, o_max, o_count, min_conf, chain_h
+                ),
+            );
+        }
+
         let txids = self
             .client
             .quick_send(request, zip32::AccountId::ZERO, true)
@@ -374,6 +397,18 @@ impl ZimppyWallet {
         Ok(hex::encode(ivk.to_bytes()))
     }
 
+    /// Set the minimum confirmations required before notes are spendable.
+    /// This is persisted to disk with the wallet.
+    pub async fn set_min_confirmations(&self, min_conf: u32) {
+        let min_conf = std::num::NonZeroU32::new(min_conf).unwrap_or(std::num::NonZeroU32::new(1).expect("1 is nonzero"));
+        self.client.wallet.write().await.wallet_settings.min_confirmations = min_conf;
+    }
+
+    /// Get the current min_confirmations setting.
+    pub async fn min_confirmations(&self) -> u32 {
+        self.client.wallet.read().await.wallet_settings.min_confirmations.get()
+    }
+
     /// Get the network name ("testnet" or "mainnet").
     pub fn network(&self) -> &str {
         // Access via the config's chain type
@@ -410,16 +445,17 @@ impl ZimppyWallet {
             ),
         );
         if self.save_task_running {
-            // Wait for any pending save, then do a final save before shutting down
+            // Wait for any pending save, then stop save_task
             self.client.wait_for_save().await;
             self.client
                 .shutdown_save_task()
                 .await
                 .map_err(WalletError::Io)?;
             self.save_task_running = false;
-            // Final save after save_task is stopped (no concurrent writer)
-            self.save().await?;
         }
+        // Always force a final save to persist latest checkpoint state
+        self.client.wallet.write().await.save_required = true;
+        self.save().await?;
         trace_wallet(
             "runtime:close:done",
             format!("wallet_path={}", self.client.config().get_wallet_path().display()),

@@ -364,6 +364,14 @@ impl ZimppyWalletNapi {
     }
 
     #[napi]
+    pub async fn set_min_confirmations(&self, min_conf: u32) -> napi::Result<()> {
+        self.ensure_open().await?;
+        let wallet = self.wallet.lock().await;
+        wallet.set_min_confirmations(min_conf).await;
+        Ok(())
+    }
+
+    #[napi]
     pub async fn close(&self) -> napi::Result<()> {
         trace_napi("close", "begin");
         let mut closed = self.closed.lock().await;

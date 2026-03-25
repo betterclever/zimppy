@@ -364,75 +364,138 @@ async function walletSeed(): Promise<void> {
   }
 }
 
-async function waitForSpendable(wallet: ZimppyWalletNapi, label: string): Promise<void> {
+const ZEC_FEE = 10_000
+const BLOCK_TIME_S = 90 // ~75s target, 90s conservative
+const POLL_INTERVAL_S = 15
+
+/**
+ * Wait until wallet has enough spendable balance.
+ * - Checks `spendable >= needed` (not just pending == 0)
+ * - Upper bound based on min_confirmations * block time * 2
+ * - Early exit if no pending tx and balance is genuinely too low
+ */
+async function waitForSpendable(
+  wallet: ZimppyWalletNapi,
+  label: string,
+  needed: number,
+  minConf: number = 3,
+): Promise<void> {
+  const maxPolls = Math.max(20, Math.ceil((minConf * BLOCK_TIME_S * 2) / POLL_INTERVAL_S))
+  const earlyExitThreshold = Math.ceil((minConf * BLOCK_TIME_S * 2) / POLL_INTERVAL_S)
+  let noProgressCount = 0
   const progress = startProgress(label)
-  for (let attempt = 1; attempt <= 40; attempt++) {
-    await new Promise(r => setTimeout(r, 15_000))
+
+  for (let attempt = 1; attempt <= maxPolls; attempt++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_S * 1000))
     await wallet.sync()
     const bal = await wallet.balance()
-    progress.update(`[${attempt}/40] spendable=${bal.spendableZat} pending=${bal.pendingZat}`)
-    if (Number(bal.pendingZat) === 0 && Number(bal.spendableZat) > 0) {
+    const spendable = Number(bal.spendableZat)
+    const pending = Number(bal.pendingZat)
+    progress.update(`[${attempt}/${maxPolls}] spendable=${bal.spendableZat} pending=${bal.pendingZat}`)
+
+    if (spendable >= needed) {
       progress.stop('  confirmed')
       return
     }
+
+    // Early exit: no pending tx and balance too low — nothing to wait for
+    if (pending === 0 && spendable < needed) {
+      noProgressCount++
+      if (noProgressCount > earlyExitThreshold) {
+        progress.fail('no pending transactions and balance too low')
+        throw new Error(`Insufficient balance: have ${spendable}, need ${needed}. No pending transactions to wait for.`)
+      }
+    } else {
+      noProgressCount = 0
+    }
   }
   progress.fail('timed out waiting for confirmation')
-  throw new Error('Timed out waiting for pending balance to confirm')
+  throw new Error(`Timed out waiting for spendable balance >= ${needed}`)
 }
 
 async function walletSend(args: string[]): Promise<void> {
-  // Parse --wait flag
-  const waitFlag = args.includes('--wait')
-  const filtered = args.filter(a => a !== '--wait')
+  // Parse flags
+  const noWait = args.includes('--no-wait')
+  let minConf: number | undefined
+  const minConfIdx = args.indexOf('--min-conf')
+  if (minConfIdx !== -1 && args[minConfIdx + 1]) {
+    minConf = Number(args[minConfIdx + 1])
+  }
+  const filtered = args.filter((a, i) =>
+    a !== '--no-wait' && a !== '--min-conf' && (minConfIdx === -1 || i !== minConfIdx + 1)
+  )
 
   const to = filtered[0]
   const amountZat = filtered[1]
   const memo = filtered[2] ?? undefined
 
   if (!to || !amountZat) {
-    console.error('Usage: zimppy wallet send <address> <amount_zat> [memo] [--wait]')
+    console.error('Usage: zimppy wallet send <address> <amount_zat> [memo] [--no-wait] [--min-conf N]')
     console.error('')
-    console.error('  --wait    Wait for this transaction to confirm before exiting')
-    console.error('            Without --wait, exits after broadcast but next send')
-    console.error('            will wait for pending balance to confirm first.')
+    console.error('  --no-wait      Exit after broadcast without waiting for confirmation')
+    console.error('  --min-conf N   Override min confirmations (default: wallet setting, usually 3)')
     process.exit(1)
   }
 
   const cfg = requireConfig()
   const amountZec = (Number(amountZat) / 100_000_000).toFixed(8)
+  const needed = Number(amountZat) + ZEC_FEE
 
   let wallet: ZimppyWalletNapi | null = null
   try {
     wallet = await openWallet(cfg)
+    if (minConf !== undefined) {
+      await wallet.setMinConfirmations(minConf)
+    }
     await syncWalletWithProgress(wallet, 'Syncing')
 
-    // If there's pending balance from a previous send, wait for it to confirm
     const bal = await wallet.balance()
     console.error(`  Balance: spendable=${bal.spendableZat} pending=${bal.pendingZat} total=${bal.totalZat} zat`)
 
-    if (Number(bal.pendingZat) > 0 && Number(bal.spendableZat) < Number(amountZat) + 10_000) {
-      console.error('  Pending balance from previous send, waiting for confirmation...')
-      await waitForSpendable(wallet, 'Awaiting prior confirmation')
-      const updated = await wallet.balance()
-      console.error(`  Balance: spendable=${updated.spendableZat} pending=${updated.pendingZat} total=${updated.totalZat} zat`)
+    const effectiveMinConf = minConf ?? 3
+    const maxRetries = Math.max(24, Math.ceil((effectiveMinConf * BLOCK_TIME_S * 2) / POLL_INTERVAL_S))
+
+    // Send with retry: if change from a prior tx isn't mature enough,
+    // the proposal fails with "insufficient balance" even though total is enough.
+    // Retry until min_conf blocks pass and the change becomes spendable.
+    console.error(`  Sending ${amountZat} zat (${amountZec} ZEC) to ${to.slice(0, 25)}...`)
+    let txid: string | null = null
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        const progress = startProgress('Waiting for change to mature')
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_S * 1000))
+        await wallet.sync()
+        const b = await wallet.balance()
+        progress.stop(`  [${attempt}/${maxRetries}] spendable=${b.spendableZat} pending=${b.pendingZat}`)
+        if (Number(b.totalZat) < needed) {
+          console.error('  Insufficient total balance. Nothing to wait for.')
+          break
+        }
+      }
+      try {
+        txid = await wallet.send(to, amountZat, memo ?? null)
+        break
+      } catch (error) {
+        const msg = (error as Error).message
+        if (msg.includes('Insufficient balance') && Number((await wallet.balance()).totalZat) >= needed) {
+          if (attempt === 0) {
+            console.error(`  Change not yet mature (min_conf=${effectiveMinConf}), retrying...`)
+          }
+          continue
+        }
+        throw error
+      }
     }
 
-    // Send
-    console.error(`  Sending ${amountZat} zat (${amountZec} ZEC) to ${to.slice(0, 25)}...`)
-    const broadcast = startProgress('Broadcasting')
-    let txid: string
-    try {
-      txid = await wallet.send(to, amountZat, memo ?? null)
-      broadcast.stop('  done')
-    } catch (error) {
-      broadcast.fail((error as Error).message)
-      throw error
+    if (!txid) {
+      console.error('ERROR: Timed out waiting for change to mature')
+      process.exit(1)
     }
     console.error(`  txid: ${txid}`)
 
-    // If --wait, poll until this tx confirms
-    if (waitFlag) {
-      await waitForSpendable(wallet, 'Awaiting confirmation')
+    // Post-send: wait for this tx's change to mature (unless --no-wait)
+    if (!noWait) {
+      await waitForSpendable(wallet, 'Awaiting confirmation', needed, effectiveMinConf)
       const postBal = await wallet.balance()
       console.error(`  Balance: spendable=${postBal.spendableZat} pending=${postBal.pendingZat} total=${postBal.totalZat} zat`)
     }
