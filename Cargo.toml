@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zimppy-core", "crates/zimppy-napi", "crates/zimppy-rs", "crates/zimppy-wallet", "examples/fortune-teller/server", "examples/llm-summarizer/server"]
+members = ["crates/zimppy-core", "crates/zimppy-napi", "crates/zimppy-rs", "crates/zimppy-wallet", "examples/fortune-teller/server", "examples/llm-summarizer/server", "examples/send-test"]
 resolver = "2"
 
 [workspace.package]

@@ -21,6 +21,9 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 dirs = "6"
+libc = "0.2"
+indicatif = "0.17"
+console = "0.15"
 
 [lints]
 workspace = true

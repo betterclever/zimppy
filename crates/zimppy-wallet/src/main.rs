@@ -1,13 +1,52 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
+use console::style;
+use indicatif::{ProgressBar, ProgressStyle};
 use zcash_protocol::consensus::NetworkType;
 use zimppy_wallet::{WalletConfig, WalletError, ZimppyWallet};
 
+// ── UI helpers ───────────────────────────────────────────────────
+
+fn spinner(msg: &str) -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} {msg}")
+            .expect("template")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+    );
+    pb.set_message(msg.to_string());
+    pb.enable_steady_tick(Duration::from_millis(80));
+    pb
+}
+
+fn format_zat(zat: u64) -> String {
+    let zec = zat as f64 / 100_000_000.0;
+    if zec >= 0.01 {
+        format!("{} zat ({:.4} ZEC)", zat, zec)
+    } else {
+        format!("{} zat", zat)
+    }
+}
+
+fn print_balance(bal: &zimppy_wallet::WalletBalance) {
+    eprintln!("  Spendable: {}", style(format_zat(bal.spendable_zat)).green());
+    if bal.pending_zat > 0 {
+        eprintln!("  Pending:   {}", style(format_zat(bal.pending_zat)).yellow());
+    }
+    eprintln!("  Total:     {}", format_zat(bal.total_zat));
+}
+
+// ── Main ─────────────────────────────────────────────────────────
+
+const POLL_INTERVAL: Duration = Duration::from_secs(15);
+const BLOCK_TIME_SECS: u64 = 90;
+
 #[tokio::main]
 async fn main() -> Result<(), WalletError> {
-    tracing_subscriber::fmt::init();
-
     let args: Vec<String> = std::env::args().collect();
+    let debug = args.contains(&"--debug".to_string());
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
     let data_dir = std::env::var("ZIMPPY_WALLET_DIR")
@@ -18,6 +57,23 @@ async fn main() -> Result<(), WalletError> {
                 .join(".zimppy")
                 .join("wallet")
         });
+
+    // Tracing: file by default, stderr with --debug
+    let log_dir = data_dir.join("logs");
+    std::fs::create_dir_all(&log_dir).ok();
+    if debug {
+        tracing_subscriber::fmt::init();
+    } else {
+        let log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("wallet.log"))
+            .expect("failed to open log file");
+        tracing_subscriber::fmt()
+            .with_writer(std::sync::Mutex::new(log_file))
+            .with_ansi(false)
+            .init();
+    }
 
     let lwd = std::env::var("ZIMPPY_LWD_ENDPOINT")
         .unwrap_or_else(|_| "https://testnet.zec.rocks".to_string());
@@ -36,9 +92,9 @@ async fn main() -> Result<(), WalletError> {
             let phrase = args.get(2).ok_or(WalletError::InvalidSeed(
                 "usage: zimppy-wallet init \"seed phrase words...\"".to_string(),
             ))?;
-
             let birthday: Option<u32> = args.get(3).and_then(|s| s.parse().ok());
 
+            let sp = spinner("Creating wallet...");
             let wallet = ZimppyWallet::create(WalletConfig {
                 data_dir: data_dir.clone(),
                 lwd_endpoint: lwd,
@@ -47,9 +103,12 @@ async fn main() -> Result<(), WalletError> {
                 birthday_height: birthday,
             })
             .await?;
-            eprintln!("Wallet created at {}", data_dir.display());
+            sp.finish_and_clear();
+
             let addr = wallet.address().await?;
-            println!("Address: {addr}");
+            eprintln!("{} Wallet created at {}", style("✓").green().bold(), data_dir.display());
+            eprintln!("  Address: {}", style(&addr).cyan());
+            println!("{addr}");
         }
 
         "sync" => {
@@ -57,15 +116,14 @@ async fn main() -> Result<(), WalletError> {
             if let Some(mc) = min_confirmations {
                 wallet.set_min_confirmations(mc).await;
             }
-            eprintln!("Syncing...");
-            let status = wallet.sync().await?;
-            eprintln!("Synced: {}", status.is_synced);
+
+            let sp = spinner("Syncing with blockchain...");
+            wallet.sync().await?;
+            sp.finish_and_clear();
 
             let bal = wallet.balance().await?;
-            println!(
-                "Balance: {} zat (spendable: {}, pending: {})",
-                bal.total_zat, bal.spendable_zat, bal.pending_zat
-            );
+            eprintln!("{} Synced", style("✓").green().bold());
+            print_balance(&bal);
             wallet.close_runtime().await?;
         }
 
@@ -76,11 +134,13 @@ async fn main() -> Result<(), WalletError> {
         }
 
         "balance" => {
-            let wallet = open_existing(&data_dir, &lwd, network).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
+            let sp = spinner("Syncing...");
+            wallet.sync().await?;
+            sp.finish_and_clear();
             let bal = wallet.balance().await?;
-            println!("Spendable: {} zat", bal.spendable_zat);
-            println!("Pending:   {} zat", bal.pending_zat);
-            println!("Total:     {} zat", bal.total_zat);
+            print_balance(&bal);
+            wallet.close_runtime().await?;
         }
 
         "send" => {
@@ -99,152 +159,151 @@ async fn main() -> Result<(), WalletError> {
             }
             let min_conf = wallet.min_confirmations().await;
 
-            eprintln!("Syncing before send...");
+            let sp = spinner("Syncing...");
             wallet.sync().await?;
+            sp.finish_and_clear();
 
             let bal = wallet.balance().await?;
-            eprintln!(
-                "Balance: spendable={} pending={} total={}",
-                bal.spendable_zat, bal.pending_zat, bal.total_zat
-            );
+            eprintln!("  Spendable: {}", style(format_zat(bal.spendable_zat)).cyan());
 
-            let short = if to.len() > 25 { &to[..25] } else { to.as_str() };
-            eprintln!("Sending {} zat to {}...", amount, short);
+            let short = if to.len() > 40 {
+                format!("{}...{}", &to[..20], &to[to.len()-12..])
+            } else {
+                to.to_string()
+            };
 
-            // Send with retry: if change from a prior tx isn't mature enough,
-            // the proposal fails with "insufficient balance" even though total is enough.
-            // Retry until min_conf blocks pass and the change becomes spendable.
+            // Send with retry for change maturity
             let max_attempts = std::cmp::max(
                 24usize,
-                ((min_conf as u64) * BLOCK_TIME_SECS * 2 / POLL_INTERVAL_SECS) as usize,
+                ((min_conf as u64) * BLOCK_TIME_SECS * 2 / 15) as usize,
             );
             let mut txid = None;
+            let started = std::time::Instant::now();
+            let sp = spinner(&format!("Sending {} to {}", format_zat(amount), short));
+
             for attempt in 0..=max_attempts {
                 if attempt > 0 {
-                    tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+                    let elapsed = started.elapsed().as_secs();
+                    sp.set_message(format!(
+                        "Waiting for prior change to mature... {}s elapsed", elapsed
+                    ));
+                    tokio::time::sleep(POLL_INTERVAL).await;
                     wallet.sync().await?;
-                    let bal = wallet.balance().await?;
-                    eprint!(
-                        "\r  [retry {attempt}/{max_attempts}] spendable={} pending={}    ",
-                        bal.spendable_zat, bal.pending_zat
-                    );
-                    // Early exit: total balance genuinely too low
-                    if bal.total_zat < amount + 10_000 {
-                        eprintln!("\nInsufficient total balance.");
+                    let b = wallet.balance().await?;
+                    if b.total_zat < amount + 10_000 {
+                        sp.finish_and_clear();
+                        eprintln!("{} Insufficient balance", style("✗").red().bold());
                         break;
                     }
                 }
                 match wallet.send(to, amount, memo).await {
                     Ok(id) => {
-                        if attempt > 0 { eprintln!(); }
                         txid = Some(id);
                         break;
                     }
                     Err(e) => {
                         let msg = e.to_string();
                         if msg.contains("Insufficient balance") && bal.total_zat >= amount + 10_000 {
-                            if attempt == 0 {
-                                eprintln!("Change not yet mature (min_conf={}), waiting...", min_conf);
-                            }
                             continue;
                         }
+                        sp.finish_and_clear();
                         return Err(e);
                     }
                 }
             }
+            sp.finish_and_clear();
+
             let txid = txid.ok_or_else(|| {
                 WalletError::Send("Timed out waiting for change to mature".to_string())
             })?;
-            eprintln!("Broadcast: txid={txid}");
+            eprintln!("{} Broadcast: {}", style("✓").green().bold(), style(&txid).dim());
 
-            // Post-send: wait for this tx's change to mature too
-            eprintln!("Waiting for confirmation (min_conf={})...", min_conf);
-            wait_for_send_maturity(&mut wallet, amount + 10_000, min_conf).await?;
+            // Wait for maturity
+            let sp = spinner("Waiting for confirmation...");
+            wait_for_maturity(&mut wallet, amount + 10_000, min_conf, &sp).await?;
+            sp.finish_and_clear();
 
             let bal = wallet.balance().await?;
-            eprintln!(
-                "Final: spendable={} pending={} total={}",
-                bal.spendable_zat, bal.pending_zat, bal.total_zat
+            eprintln!("{} Confirmed — spendable: {}",
+                style("✓").green().bold(),
+                style(format_zat(bal.spendable_zat)).cyan()
             );
+
             wallet.close_runtime().await?;
             println!("{txid}");
         }
 
         _ => {
-            eprintln!("zimppy-wallet — native Zcash wallet CLI");
+            eprintln!("{}", style("zimppy-wallet").bold());
+            eprintln!("Native Zcash wallet CLI");
             eprintln!();
-            eprintln!("Commands:");
-            eprintln!("  init <seed_phrase> [birthday]  Create/restore wallet from seed");
-            eprintln!("  sync                           Sync with blockchain");
-            eprintln!("  address                        Show unified address");
-            eprintln!("  balance                        Show balance");
-            eprintln!("  send <addr> <zat> [memo]       Send ZEC");
+            eprintln!("{}:", style("Commands").underlined());
+            eprintln!("  {} <seed> [birthday]   Create/restore wallet", style("init").green());
+            eprintln!("  {}                      Sync with blockchain", style("sync").green());
+            eprintln!("  {}                   Show unified address", style("address").green());
+            eprintln!("  {}                   Show balance", style("balance").green());
+            eprintln!("  {} <addr> <zat> [memo]  Send ZEC", style("send").green());
             eprintln!();
-            eprintln!("Environment:");
-            eprintln!("  ZIMPPY_WALLET_DIR    Data directory (default: ~/.zimppy/wallet)");
-            eprintln!(
-                "  ZIMPPY_LWD_ENDPOINT  Lightwalletd URL (default: https://testnet.zec.rocks)"
-            );
-            eprintln!("  ZIMPPY_NETWORK       mainnet or testnet (default: testnet)");
-            eprintln!("  ZIMPPY_MIN_CONFIRMATIONS  Min confirmations for spendable (default: 3)");
+            eprintln!("{}:", style("Flags").underlined());
+            eprintln!("  {}                 Show debug logs on stderr", style("--debug").yellow());
+            eprintln!();
+            eprintln!("{}:", style("Environment").underlined());
+            eprintln!("  ZIMPPY_WALLET_DIR           Data directory");
+            eprintln!("  ZIMPPY_LWD_ENDPOINT         Lightwalletd URL");
+            eprintln!("  ZIMPPY_NETWORK              mainnet | testnet");
+            eprintln!("  ZIMPPY_MIN_CONFIRMATIONS    Min confirmations (default: 3)");
         }
     }
 
     Ok(())
 }
 
-const POLL_INTERVAL_SECS: u64 = 15;
-const BLOCK_TIME_SECS: u64 = 90; // ~75s target, 90s conservative
+// ── Helpers ──────────────────────────────────────────────────────
 
-/// Wait until wallet has `needed` zats spendable (post-send maturity wait).
-/// Upper-bounded by min_confirmations * block_time * 2.
-/// Retries the actual send would work by checking spendable >= needed.
-async fn wait_for_send_maturity(
+async fn wait_for_maturity(
     wallet: &mut ZimppyWallet,
     needed: u64,
     min_conf: u32,
+    sp: &ProgressBar,
 ) -> Result<(), WalletError> {
     let max_polls = std::cmp::max(
         20usize,
-        ((min_conf as u64) * BLOCK_TIME_SECS * 2 / POLL_INTERVAL_SECS) as usize,
+        ((min_conf as u64) * BLOCK_TIME_SECS * 2 / 15) as usize,
     );
     let mut stale_count = 0u32;
-    let stale_limit = std::cmp::max(min_conf * 8, 24); // generous: ~2 full block cycles
+    let stale_limit = std::cmp::max(min_conf * 8, 24);
+    let started = std::time::Instant::now();
+    let est_secs = min_conf as u64 * 75; // estimated time for min_conf blocks
 
-    for attempt in 1..=max_polls {
-        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+    for _attempt in 1..=max_polls {
+        tokio::time::sleep(POLL_INTERVAL).await;
         wallet.sync().await?;
         let bal = wallet.balance().await?;
-        eprint!(
-            "\r  [{attempt}/{max_polls}] spendable={} pending={}    ",
-            bal.spendable_zat, bal.pending_zat
-        );
+        let elapsed = started.elapsed().as_secs();
+        let remaining = est_secs.saturating_sub(elapsed);
+
+        if bal.pending_zat > 0 {
+            sp.set_message(format!("Confirming... {}s elapsed, ~{}s remaining",
+                elapsed, remaining));
+        } else {
+            sp.set_message(format!("Maturing... {}s elapsed", elapsed));
+        }
 
         if bal.spendable_zat >= needed {
-            eprintln!("\nSpendable!");
             return Ok(());
         }
-
-        // Early exit: nothing in flight and balance genuinely too low
         if bal.pending_zat == 0 && bal.total_zat < needed {
-            eprintln!("\nInsufficient total balance ({} < {}). Nothing to wait for.", bal.total_zat, needed);
             return Ok(());
         }
-
-        // If pending=0 but spendable < needed, change is maturing (needs more confirmations)
-        // Give it time proportional to min_conf before giving up
         if bal.pending_zat == 0 && bal.spendable_zat < needed {
             stale_count += 1;
             if stale_count > stale_limit {
-                eprintln!("\nChange not maturing after {} polls. Proceeding.", stale_count);
                 return Ok(());
             }
         } else {
             stale_count = 0;
         }
     }
-
-    eprintln!("\nTimed out waiting for spendable balance.");
     Ok(())
 }
 

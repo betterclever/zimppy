@@ -131,7 +131,7 @@ pub struct ZimppyWalletNapi {
 }
 
 fn trace_napi(event: &str, details: impl std::fmt::Display) {
-    eprintln!(
+    tracing::debug!(
         "[zimppy-napi:{event}] pid={} ts_ms={} {details}",
         std::process::id(),
         SystemTime::now()

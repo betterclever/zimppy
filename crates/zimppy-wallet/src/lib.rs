@@ -57,7 +57,7 @@ fn trace_id() -> String {
 }
 
 fn trace_wallet(event: &str, details: impl std::fmt::Display) {
-    eprintln!("[zimppy-wallet:{event}] {} {details}", trace_id());
+    tracing::debug!("[zimppy-wallet:{event}] {} {details}", trace_id());
 }
 
 impl ZimppyWallet {

@@ -1,0 +1,10 @@
+[package]
+name = "send-test"
+edition = "2021"
+publish = false
+
+[dependencies]
+zimppy-wallet = { path = "../../crates/zimppy-wallet" }
+zcash_protocol = "0.7"
+tokio = { version = "1", features = ["full"] }
+dirs = "6"
