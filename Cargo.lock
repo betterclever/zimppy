@@ -8417,7 +8417,7 @@ dependencies = [
 [[package]]
 name = "zingo-price"
 version = "0.0.1"
-source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.0-rc.6#127332852e47a99c350b6fb88a60d65dbcef982e"
+source = "git+https://github.com/betterclever/zingolib.git?rev=aa92aaf7#aa92aaf789feb142eab39086d6bb1aee8c59ac45"
 dependencies = [
  "byteorder",
  "reqwest",
@@ -8451,8 +8451,8 @@ dependencies = [
 
 [[package]]
 name = "zingolib"
-version = "3.0.0-rc.6"
-source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.0-rc.6#127332852e47a99c350b6fb88a60d65dbcef982e"
+version = "3.0.0"
+source = "git+https://github.com/betterclever/zingolib.git?rev=aa92aaf7#aa92aaf789feb142eab39086d6bb1aee8c59ac45"
 dependencies = [
  "append-only-vec",
  "bech32 0.11.1",
