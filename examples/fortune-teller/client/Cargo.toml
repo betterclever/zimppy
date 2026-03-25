@@ -1,21 +1,18 @@
 [package]
-name = "zimppy-rust-server"
+name = "zimppy-rust-client"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
 [[bin]]
-name = "zimppy-rust-server"
+name = "zimppy-rust-client"
 path = "src/main.rs"
 
 [dependencies]
-axum = "0.8"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-mpp = { git = "https://github.com/tempoxyz/mpp-rs", features = ["server", "axum"] }
-serde = { version = "1.0", features = ["derive"] }
+mpp = { git = "https://github.com/tempoxyz/mpp-rs", features = ["client"] }
+reqwest = { version = "0.12", features = ["json"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
-async-stream = "0.3"
 zcash_protocol = "0.7"
 zimppy-rs = { path = "../../../crates/zimppy-rs" }
 zimppy-wallet = { path = "../../../crates/zimppy-wallet" }

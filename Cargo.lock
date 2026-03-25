@@ -3147,9 +3147,11 @@ version = "0.5.0"
 source = "git+https://github.com/tempoxyz/mpp-rs#102bef4db346e4273b122daccad1a5dda7b2f22a"
 dependencies = [
  "async-stream",
+ "axum-core",
  "base64",
  "futures-core",
  "hmac 0.12.1",
+ "http",
  "reqwest",
  "serde",
  "serde_json",
@@ -8405,6 +8407,7 @@ dependencies = [
 name = "zimppy-rs"
 version = "0.2.0"
 dependencies = [
+ "chrono",
  "futures-lite",
  "hex",
  "mpp",
@@ -8413,6 +8416,19 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "zimppy-core",
+ "zimppy-wallet",
+]
+
+[[package]]
+name = "zimppy-rust-client"
+version = "0.2.0"
+dependencies = [
+ "mpp",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "zcash_protocol",
+ "zimppy-rs",
  "zimppy-wallet",
 ]
 

@@ -8,11 +8,12 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 
-use mpp::compute_challenge_id;
-use mpp::parse_authorization;
 use mpp::protocol::core::{Base64UrlJson, PaymentChallenge};
-use mpp::protocol::intents::{ChargeRequest, SessionRequest};
+use mpp::protocol::intents::SessionRequest;
+use mpp::server::axum::{ChargeChallenger, ChargeConfig, MppCharge, WithReceipt};
 use mpp::server::Mpp;
+use mpp::{compute_challenge_id, parse_authorization};
+use zimppy_rs::axum::ZcashChallenger;
 use zimppy_rs::session::RefundConfig;
 use zimppy_rs::{ZcashChargeMethod, ZcashSessionMethod};
 use zimppy_wallet::ZimppyWallet;
@@ -27,15 +28,32 @@ struct ServerWalletConfig {
     orchard_ivk: String,
 }
 
+// ── Charge pricing ──────────────────────────────────────────────
+
+struct FortunePrice;
+
+impl ChargeConfig for FortunePrice {
+    fn amount() -> &'static str {
+        "42000"
+    }
+    fn description() -> Option<&'static str> {
+        Some("Fortune telling - one shielded payment, one fortune")
+    }
+}
+
+// ── App state ───────────────────────────────────────────────────
+
 struct AppState {
+    challenger: Arc<dyn ChargeChallenger>,
+    /// Keep the Mpp for session verification.
     mpp: Mpp<ZcashChargeMethod, ZcashSessionMethod>,
     /// Keep a clone for direct session access (deduct, get_session for SSE streaming).
     session: ZcashSessionMethod,
     config: ServerWalletConfig,
     amount_zat: u64,
-    /// Needed for challenge creation (Mpp doesn't expose its secret_key).
     secret_key: String,
 }
+
 
 #[tokio::main]
 async fn main() {
@@ -102,9 +120,18 @@ async fn main() {
         }
     };
 
-    let mpp = Mpp::new(charge, "zimppy", &secret_key).with_session_method(session.clone());
+    let mpp = Mpp::new(charge.clone(), "zimppy", &secret_key).with_session_method(session.clone());
+
+    let challenger: Arc<dyn ChargeChallenger> = Arc::new(ZcashChallenger::from_mpp(
+        Mpp::new(charge, "zimppy", &secret_key),
+        &secret_key,
+        "zimppy",
+        &config.address,
+        &config.network,
+    ));
 
     let state = Arc::new(AppState {
+        challenger,
         mpp,
         session,
         config,
@@ -112,14 +139,20 @@ async fn main() {
         secret_key,
     });
 
-    let app = Router::new()
-        .route("/api/health", get(health))
+    // Charge endpoint uses MppCharge extractor (needs Arc<dyn ChargeChallenger> state)
+    let charge_router = Router::new()
         .route("/api/fortune", get(fortune))
+        .with_state(state.challenger.clone());
+
+    // Session/stream/discovery use AppState
+    let app_router = Router::new()
+        .route("/api/health", get(health))
         .route("/api/session/fortune", get(session_fortune))
         .route("/api/stream/fortune", get(stream_fortune))
-        // Non-standard convenience endpoint (MPP discovery spec uses /openapi.json)
         .route("/.well-known/payment", get(discovery))
         .with_state(state.clone());
+
+    let app = charge_router.merge(app_router);
 
     eprintln!("  stream endpoint: /api/stream/fortune (SSE, 1000 zat/token)");
     eprintln!("  session endpoint: /api/session/fortune");
@@ -155,72 +188,14 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok", "service": "zimppy-mpp-server" }))
 }
 
-// ── Charge endpoint ─────────────────────────────────────────────
+// ── Charge endpoint (MppCharge extractor) ───────────────────────
 
-async fn fortune(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
-    if let Some(credential) = parse_credential(&headers) {
-        match state.mpp.verify_credential(&credential).await {
-            Ok(receipt) => {
-                let receipt_header = receipt.to_header().unwrap_or_default();
-                let fortune = pick_fortune();
-                eprintln!("[200] Payment verified! Serving fortune: {fortune}");
-                return (
-                    StatusCode::OK,
-                    [
-                        ("payment-receipt", receipt_header),
-                        ("cache-control", "private".to_string()),
-                    ],
-                    Json(serde_json::json!({ "fortune": fortune })),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                eprintln!("[VERIFY] Error: {e}");
-                // Fall through to issue new challenge
-            }
-        }
-    }
-    issue_charge_challenge(&state).into_response()
-}
-
-fn issue_charge_challenge(state: &AppState) -> axum::response::Response {
-    let request = ChargeRequest {
-        amount: state.amount_zat.to_string(),
-        currency: "zec".to_string(),
-        recipient: Some(state.config.address.clone()),
-        method_details: Some(serde_json::json!({
-            "memo": "zimppy:{id}",
-            "network": state.config.network,
-        })),
-        ..Default::default()
-    };
-
-    match build_challenge(state, "charge", &request) {
-        Ok(challenge) => {
-            let memo_display = format!("zimppy:{}", challenge.id);
-            eprintln!("[402] Issuing challenge:");
-            eprintln!("  challenge_id: {}", challenge.id);
-            eprintln!("  recipient: {}", state.config.address);
-            eprintln!("  amount: {} zat", state.amount_zat);
-            eprintln!("  memo: {memo_display}");
-
-            let www_auth = challenge.to_header().unwrap_or_default();
-            (
-                StatusCode::PAYMENT_REQUIRED,
-                [
-                    (header::WWW_AUTHENTICATE, www_auth),
-                    (header::CONTENT_TYPE, PROBLEM_JSON.to_string()),
-                    (header::CACHE_CONTROL, "no-store".to_string()),
-                ],
-                Json(serde_json::json!({
-                    "type": "https://paymentauth.org/problems/payment-required",
-                    "title": "Payment Required",
-                    "status": 402,
-                    "detail": format!("Send {} zat to {} with memo '{}'", state.amount_zat, state.config.address, memo_display),
-                })),
-            ).into_response()
-        }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+async fn fortune(charge: MppCharge<FortunePrice>) -> WithReceipt<Json<serde_json::Value>> {
+    let fortune = pick_fortune();
+    eprintln!("[200] Payment verified! Serving fortune: {fortune}");
+    WithReceipt {
+        receipt: charge.receipt,
+        body: Json(serde_json::json!({ "fortune": fortune })),
     }
 }
 
