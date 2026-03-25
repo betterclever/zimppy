@@ -133,7 +133,7 @@
       flex: 1; text-align: center; color: var(--text-3);
       font-size: 0.72rem; margin-right: 40px;
     }
-    .term-body { padding: 1rem 1.25rem; min-height: 220px; }
+    .term-body { padding: 1rem 1.25rem; height: 380px; overflow-y: auto; }
     .term-line { white-space: pre; }
     .t-prompt { color: var(--accent); }
     .t-cmd { color: var(--text); }
@@ -452,7 +452,7 @@
         <div class="term-dot r"></div>
         <div class="term-dot y"></div>
         <div class="term-dot g"></div>
-        <div class="term-title">zimppy</div>
+        <div class="term-title">agent + zimppy</div>
       </div>
       <div class="term-body" id="term-body"></div>
     </div>
@@ -989,82 +989,109 @@ function startSpinner(body, message) {
   };
 }
 
-// Animated CLI demo in hero terminal
+// Helper: add a static line
+function addLine(body, html) {
+  const div = document.createElement('div');
+  div.className = 'term-line';
+  if (html) div.innerHTML = html;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+  return div;
+}
+
+// Helper: type out a command character by character
+async function typeCmd(body, cmd, charDelay = 30) {
+  const div = addLine(body, '');
+  for (let i = 0; i < cmd.length; i++) {
+    if (i === 0) div.innerHTML = '<span class="t-prompt">$ </span>';
+    else if (i >= 2) {
+      div.innerHTML = `<span class="t-prompt">$ </span><span class="t-cmd">${cmd.slice(2, i + 1)}</span>`;
+    }
+    await sleep(i < 2 ? 0 : charDelay);
+  }
+  return div;
+}
+
+// Animated CLI demo in hero terminal — code agent style
 async function runDemo() {
   const body = document.getElementById('term-body');
   body.innerHTML = '';
-
-  // Type command
-  const cmdDiv = document.createElement('div');
-  cmdDiv.className = 'term-line';
-  body.appendChild(cmdDiv);
   await sleep(400);
 
-  const cmd = '$ npx zimppy request https://fortune.api.dev/fortune';
-  for (let i = 0; i < cmd.length; i++) {
-    const c = cmd[i];
-    if (i === 0) cmdDiv.innerHTML = '<span class="t-prompt">$ </span>';
-    else if (i >= 2) {
-      const typed = cmd.slice(2, i + 1);
-      cmdDiv.innerHTML = `<span class="t-prompt">$ </span><span class="t-cmd">${typed}</span>`;
-    }
-    await sleep(i < 2 ? 0 : 35);
-  }
-  await sleep(500);
-
-  body.appendChild(Object.assign(document.createElement('div'), { className: 'term-line' }));
-
-  // Spinner: Syncing wallet
-  const sp1 = startSpinner(body, 'Syncing wallet...');
-  await sleep(2200);
-  sp1.stop(`  <span class="t-green">✓</span> Synced <span class="t-dim">${sp1.elapsed()}s</span>`);
-  await sleep(300);
-
-  // Static: Spendable balance
-  const balDiv = document.createElement('div');
-  balDiv.className = 'term-line';
-  balDiv.innerHTML = `  Spendable: <span class="t-cyan">1596656000 zat (15.9666 ZEC)</span>`;
-  body.appendChild(balDiv);
-  await sleep(400);
-
-  // Spinner: Sending shielded payment
-  const sp2 = startSpinner(body, 'Sending 42000 zat...');
-  await sleep(3000);
-  sp2.stop(`  <span class="t-green">✓</span> Broadcast: <span class="t-dim">a66188bb...91091354</span>`);
-  body.scrollTop = body.scrollHeight;
-  await sleep(300);
-
-  // Spinner: Awaiting confirmation
-  const sp3 = startSpinner(body, 'Awaiting confirmation');
-  await sleep(2800);
-  sp3.stop(`  <span class="t-green">✓</span> Confirmed <span class="t-dim">${sp3.elapsed()}s</span>`);
-  await sleep(200);
-
-  // Spinner: Retrying with credential
-  const sp4 = startSpinner(body, 'Retrying with credential...');
-  await sleep(800);
-  sp4.stop(`  <span class="t-green">✓</span> <span class="t-yellow">200</span> Payment-Receipt verified`);
-  await sleep(200);
-
-  body.appendChild(Object.assign(document.createElement('div'), { className: 'term-line' }));
-
-  // Fortune output
-  const out = document.createElement('div');
-  out.className = 'term-line';
-  out.innerHTML = `<span class="t-cyan">"A shielded transaction brings peace of mind."</span>`;
-  body.appendChild(out);
+  // ── User asks to translate a confidential NDA ──
+  addLine(body, `<span class="t-accent">&gt;</span> translate this NDA from mandarin to english`);
   await sleep(600);
+  addLine(body, '');
 
-  body.appendChild(Object.assign(document.createElement('div'), { className: 'term-line' }));
+  // Discovery
+  addLine(body, `  <span class="t-dim">\u2500\u2500\u2500 zimppy wallet services \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</span>`);
+  const sp0 = startSpinner(body, '<span class="t-dim">discovering</span>');
+  await sleep(1400);
+  sp0.stop(`  <span class="t-green">\u2713</span> found <span class="t-cyan">2 services</span>`);
+  await sleep(200);
+  addLine(body, '');
+  addLine(body, `  <span class="t-cyan">translate.api.dev</span>    <span class="t-dim">142 langs</span>   <span class="t-green">20,000 zat</span>`);
+  addLine(body, `  <span class="t-cyan">linguo.api.dev</span>       <span class="t-dim">36 langs</span>     <span class="t-green">8,000 zat</span>`);
+  addLine(body, `  <span class="t-dim">\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</span>`);
+  await sleep(400);
+  addLine(body, '');
 
-  // Final prompt
-  const prompt = document.createElement('div');
-  prompt.className = 'term-line';
-  prompt.innerHTML = `<span class="t-prompt">$ </span><span class="term-cursor"></span>`;
-  body.appendChild(prompt);
+  addLine(body, `<span class="t-cyan">\u25c6</span> Using translate.api.dev \u2014 Mandarin supported.`);
+  await sleep(500);
+  addLine(body, '');
+
+  // Payment
+  addLine(body, `  <span class="t-dim">\u2500\u2500\u2500 zimppy request translate.api.dev \u2500\u2500\u2500</span>`);
+  addLine(body, `  <span class="t-yellow">402</span> <span class="t-dim">zcash charge</span> <span class="t-cyan">20,000 zat</span> <span class="t-dim">(~$0.05)</span>`);
+  await sleep(300);
+
+  const sp1 = startSpinner(body, '<span class="t-dim">shielded payment</span>');
+  await sleep(2000);
+  sp1.stop(`  <span class="t-green">\u2713</span> paid <span class="t-dim">c7f3a1e2...4d9b</span>`);
+  await sleep(200);
+
+  const sp2 = startSpinner(body, '<span class="t-dim">on-chain confirmation</span>');
+  await sleep(2200);
+  sp2.stop(`  <span class="t-green">\u2713</span> confirmed <span class="t-dim">${sp2.elapsed()}s</span>`);
+  await sleep(200);
+
+  addLine(body, `  <span class="t-green">\u2713</span> <span class="t-yellow">200</span> receipt verified`);
+  addLine(body, `  <span class="t-dim">\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</span>`);
+  await sleep(400);
+  addLine(body, '');
+
+  // Streamed translation
+  addLine(body, `<span class="t-cyan">\u25c6</span> Translation:`);
+  await sleep(200);
+  addLine(body, '');
+  const lines = [
+    '"Party A shall not disclose the acquisition',
+    'price of the semiconductor division to any',
+    'third party, including but not limited to',
+    'employees, advisors, or affiliates of Party B,',
+    'without prior written consent..."',
+  ];
+  for (const line of lines) {
+    const div = addLine(body, '');
+    let html = '  ';
+    for (const ch of line) {
+      html += ch;
+      div.innerHTML = `<span class="t-dim">${html}</span>`;
+      body.scrollTop = body.scrollHeight;
+      await sleep(18);
+    }
+    await sleep(60);
+  }
+  await sleep(600);
+  addLine(body, '');
+  addLine(body, `  <span class="t-dim">3 pages translated \u00b7 20,000 zat \u00b7 no metadata leaked</span>`);
+  await sleep(800);
+  addLine(body, '');
+
+  addLine(body, `<span class="t-accent">&gt;</span> <span class="term-cursor"></span>`);
   body.scrollTop = body.scrollHeight;
 
-  await sleep(5000);
+  await sleep(6000);
   runDemo();
 }
 
