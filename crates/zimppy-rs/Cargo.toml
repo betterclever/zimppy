@@ -11,7 +11,8 @@ zimppy-core = { path = "../zimppy-core", features = ["shielded"] }
 zimppy-wallet = { path = "../zimppy-wallet" }
 futures-lite = "2"
 hex = "0.4"
-mpp = { git = "https://github.com/tempoxyz/mpp-rs", features = ["server", "client"] }
+mpp = { git = "https://github.com/tempoxyz/mpp-rs", features = ["server", "client", "axum"] }
+chrono = "0.4"
 sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

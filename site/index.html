@@ -236,7 +236,8 @@
     }
     .int-code {
       padding: 1.25rem; font-family: var(--mono); font-size: 0.76rem;
-      line-height: 1.7; overflow-x: auto; color: var(--text-2);
+      line-height: 1.7; overflow: auto; color: var(--text-2);
+      max-height: 320px;
     }
     .int-code .kw { color: var(--accent); }
     .int-code .str { color: var(--green); }
@@ -533,22 +534,32 @@
 <span class="kw">return</span> result.<span class="fn">withReceipt</span>(Response.<span class="fn">json</span>({ data }))</pre></div>
         </div>
         <div id="srv-rs" class="tab-panel">
-          <div class="int-code"><pre><span class="kw">use</span> mpp::server::Mpp;
+          <div class="int-code"><pre><span class="kw">use</span> mpp::server::axum::*;
+<span class="kw">use</span> mpp::server::Mpp;
 <span class="kw">use</span> zimppy_rs::ZcashChargeMethod;
 
-<span class="kw">let</span> charge = ZcashChargeMethod::<span class="fn">new</span>(
-  &rpc_endpoint, &address, &orchard_ivk,
-);
-<span class="kw">let</span> mpp = Mpp::<span class="fn">new</span>(charge, <span class="str">"my-api"</span>, &secret);
+<span class="kw">struct</span> FortunePrice;
+<span class="kw">impl</span> ChargeConfig <span class="kw">for</span> FortunePrice {
+  <span class="kw">fn</span> <span class="fn">amount</span>() -> &<span class="str">'static str</span> { <span class="str">"42000"</span> }
+}
 
-<span class="cm">// axum handler:</span>
-<span class="kw">match</span> mpp.<span class="fn">verify_credential</span>(&credential).<span class="kw">await</span> {
-  Ok(receipt) => (
-    [(header::<span class="fn">from_static</span>(<span class="str">"payment-receipt"</span>),
-      receipt.<span class="fn">to_header</span>())],
-    Json(data),
-  ).<span class="fn">into_response</span>(),
-  Err(_) => <span class="fn">issue_402</span>(&mpp),
+<span class="kw">let</span> mpp = Mpp::<span class="fn">create</span>(ZcashChargeMethod::<span class="fn">new</span>(
+  &rpc, &address, &orchard_ivk,
+))?;
+<span class="kw">let</span> state: Arc&lt;<span class="kw">dyn</span> ChargeChallenger&gt; =
+  Arc::<span class="fn">new</span>(mpp);
+
+<span class="kw">let</span> app = Router::<span class="fn">new</span>()
+  .<span class="fn">route</span>(<span class="str">"/api/fortune"</span>, <span class="fn">get</span>(fortune))
+  .<span class="fn">with_state</span>(state);
+
+<span class="kw">async fn</span> <span class="fn">fortune</span>(
+  charge: MppCharge&lt;FortunePrice&gt;,
+) -> WithReceipt&lt;Json&lt;Value&gt;&gt; {
+  WithReceipt {
+    receipt: charge.receipt,
+    body: Json(<span class="fn">json!</span>({ <span class="str">"fortune"</span>: <span class="fn">pick</span>() })),
+  }
 }</pre></div>
         </div>
       </div>
@@ -574,21 +585,20 @@
 console.<span class="fn">log</span>(<span class="kw">await</span> res.<span class="fn">json</span>())</pre></div>
         </div>
         <div id="cli-rs" class="tab-panel">
-          <div class="int-code"><pre><span class="kw">use</span> mpp::client::PaymentProvider;
+          <div class="int-code"><pre><span class="kw">use</span> mpp::client::Fetch;
 <span class="kw">use</span> zimppy_rs::ZcashPaymentProvider;
 
 <span class="kw">let</span> provider = ZcashPaymentProvider::<span class="fn">new</span>(
   wallet_config, &rpc_endpoint,
 );
 
-<span class="cm">// Provider implements PaymentProvider trait:</span>
-<span class="cm">//   supports("zcash", "charge") → true</span>
-<span class="cm">//   pay(&challenge) → sends shielded ZEC,</span>
-<span class="cm">//     waits for confirmation,</span>
-<span class="cm">//     returns credential with txid</span>
+<span class="cm">// 402 → pay → retry handled automatically</span>
+<span class="kw">let</span> resp = client
+  .<span class="fn">get</span>(<span class="str">"https://api.example.com/fortune"</span>)
+  .<span class="fn">send_with_payment</span>(&provider)
+  .<span class="kw">await</span>?;
 
-<span class="cm">// Wire into any HTTP client that</span>
-<span class="cm">// handles the 402 → pay → retry loop</span></pre></div>
+<span class="kw">let</span> fortune = resp.<span class="fn">json</span>::&lt;Fortune&gt;().<span class="kw">await</span>?;</pre></div>
         </div>
       </div>
     </div>
@@ -817,19 +827,19 @@ session.<span class="fn">close</span>()
     <div class="cli-grid">
       <div class="cli-cmds">
         <div class="cli-cmd">
-          <h3>Create a wallet</h3>
-          <p>Fresh Zcash keys, ready in seconds.</p>
-          <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet create</span></div>
+          <h3>Check your wallet</h3>
+          <p>Address, balance, and network — synced with the blockchain.</p>
+          <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet whoami</span></div>
         </div>
         <div class="cli-cmd">
           <h3>Pay for an API call</h3>
           <p>Auto-discovers pricing, sends shielded payment, retries with credential.</p>
-          <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy request https://api.example.com/fortune</span></div>
+          <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy request https://fortune.api.dev/fortune</span></div>
         </div>
         <div class="cli-cmd">
-          <h3>Sessions</h3>
-          <p>Deposit once, instant requests. Close to get unused balance refunded.</p>
-          <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy session close</span></div>
+          <h3>Send ZEC directly</h3>
+          <p>Send shielded ZEC with confirmation waiting and live elapsed timer.</p>
+          <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet send &lt;addr&gt; 42000</span></div>
         </div>
         <div class="cli-cmd">
           <h3>Multiple wallets</h3>
@@ -842,18 +852,25 @@ session.<span class="fn">close</span>()
           <div class="term-dot r"></div>
           <div class="term-dot y"></div>
           <div class="term-dot g"></div>
-          <div class="term-title">zimppy wallet create</div>
+          <div class="term-title">zimppy wallet whoami</div>
         </div>
         <div class="term-body">
-          <div class="term-line"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet create</span></div>
+          <div class="term-line"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet whoami</span></div>
+          <div class="term-line">  <span class="t-green">✓</span> Syncing wallet <span class="t-dim">9s</span></div>
+          <div class="term-line"><span class="t-dim">--- Zimppy Wallet ---</span></div>
+          <div class="term-line">  Address:  <span class="t-cyan">utest18xzwg5s6awqz...e39ew85u5k87vk8</span></div>
+          <div class="term-line">  Balance:  <span class="t-cyan">1596656000 zat</span></div>
+          <div class="term-line">  Network:  <span class="t-yellow">testnet</span></div>
+          <div class="term-line">  Status:   <span class="t-green">Ready</span></div>
+          <div class="term-line"><span class="t-dim">---</span></div>
           <div class="term-line"></div>
-          <div class="term-line"><span class="t-green">&#10003;</span> Created wallet <span class="t-accent">"default"</span></div>
-          <div class="term-line"><span class="t-dim">  Address: </span><span class="t-cyan">zs1q7k...f9xa</span></div>
-          <div class="term-line"><span class="t-dim">  Network: </span><span class="t-yellow">testnet</span></div>
-          <div class="term-line"></div>
-          <div class="term-line"><span class="t-dim">  Save your seed phrase:</span></div>
-          <div class="term-line"><span class="t-accent">  witch collapse practice feed shame</span></div>
-          <div class="term-line"><span class="t-accent">  open despair creek road again ...</span></div>
+          <div class="term-line"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet send utest183...90nqck 10000</span></div>
+          <div class="term-line">  <span class="t-green">✓</span> Syncing <span class="t-dim">7s</span></div>
+          <div class="term-line">  Spendable: <span class="t-cyan">1596656000 zat (15.9666 ZEC)</span></div>
+          <div class="term-line">  <span class="t-green">✓</span> Broadcast: <span class="t-dim">a66188bbc1f6af91...91091354</span></div>
+          <div class="term-line">  <span class="t-green">✓</span> Confirmed <span class="t-dim">22s</span></div>
+          <div class="term-line">  Spendable: <span class="t-cyan">1596636000 zat (15.9664 ZEC)</span></div>
+          <div class="term-line">  <span class="t-green">✓</span> Send complete.</div>
           <div class="term-line"></div>
           <div class="term-line"><span class="t-prompt">$ </span><span class="term-cursor"></span></div>
         </div>
@@ -924,23 +941,8 @@ const vfObserver = new IntersectionObserver((entries) => {
 }, { threshold: 0.3 });
 vfObserver.observe(document.getElementById('vf-flow'));
 
-// Animated CLI demo in hero terminal
-const lines = [
-  { text: '', delay: 400 },
-  { text: '\x1b[prompt]$ \x1b[cmd]npx zimppy request https://fortune.api.dev/fortune', type: true, delay: 40 },
-  { text: '', delay: 600 },
-  { text: '\x1b[dim]Discovering payment methods...', delay: 800 },
-  { text: '\x1b[green]Found\x1b[reset] zcash charge \x1b[dim]amount=10,000 zat', delay: 500 },
-  { text: '', delay: 300 },
-  { text: '\x1b[dim]Sending shielded payment...', delay: 1200 },
-  { text: '\x1b[green]\u2713\x1b[reset] Payment sent \x1b[dim]txid=a8f3c2...91d7', delay: 400 },
-  { text: '\x1b[dim]Retrying with credential...', delay: 600 },
-  { text: '\x1b[green]\u2713\x1b[reset] \x1b[yellow]200\x1b[reset] Payment-Receipt verified', delay: 400 },
-  { text: '', delay: 200 },
-  { text: '\x1b[cyan]"A mass of latin words falls upon the suitor like soft snow."', delay: 0 },
-  { text: '', delay: 800 },
-  { text: '\x1b[prompt]$ \x1b[cursor]', delay: 0 },
-];
+// ── Braille spinner engine ──────────────────────────────────────
+const FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
 
 function renderSpan(raw) {
   return raw
@@ -956,49 +958,113 @@ function renderSpan(raw) {
     .replace(/\x1b\[cursor\]/g, '<span class="term-cursor"></span>');
 }
 
+/**
+ * Animate a braille spinner on a line element.
+ * Cycles frames at 80ms, shows elapsed seconds, then resolves.
+ * Returns: { div, stop(finalHtml) }
+ */
+function startSpinner(body, message) {
+  const div = document.createElement('div');
+  div.className = 'term-line';
+  body.appendChild(div);
+  let frame = 0, elapsed = 0, running = true;
+
+  const render = () => {
+    div.innerHTML = `  <span class="t-cyan">${FRAMES[frame]}</span> ${message} <span class="t-dim">${elapsed}s</span>`;
+  };
+  render();
+
+  const frameTimer = setInterval(() => { if (running) { frame = (frame + 1) % FRAMES.length; render(); } }, 80);
+  const secTimer = setInterval(() => { if (running) { elapsed++; render(); } }, 1000);
+
+  return {
+    div,
+    elapsed: () => elapsed,
+    stop(finalHtml) {
+      running = false;
+      clearInterval(frameTimer);
+      clearInterval(secTimer);
+      div.innerHTML = finalHtml;
+    }
+  };
+}
+
+// Animated CLI demo in hero terminal
 async function runDemo() {
   const body = document.getElementById('term-body');
   body.innerHTML = '';
 
-  for (const line of lines) {
-    const div = document.createElement('div');
-    div.className = 'term-line';
+  // Type command
+  const cmdDiv = document.createElement('div');
+  cmdDiv.className = 'term-line';
+  body.appendChild(cmdDiv);
+  await sleep(400);
 
-    if (line.type) {
-      const parts = line.text.split(/(\x1b\[[^\]]+\])/);
-      let spans = [];
-      let currentClass = '';
-
-      for (const part of parts) {
-        const match = part.match(/\x1b\[(\w+)\]/);
-        if (match) {
-          currentClass = 't-' + match[1];
-        } else {
-          for (const char of part) {
-            spans.push({ char, cls: currentClass });
-          }
-        }
-      }
-
-      body.appendChild(div);
-      for (let i = 0; i < spans.length; i++) {
-        const s = spans[i];
-        const span = document.createElement('span');
-        span.className = s.cls;
-        span.textContent = s.char;
-        div.appendChild(span);
-        await sleep(line.delay || 30);
-      }
-    } else {
-      div.innerHTML = renderSpan(line.text);
-      body.appendChild(div);
+  const cmd = '$ npx zimppy request https://fortune.api.dev/fortune';
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (i === 0) cmdDiv.innerHTML = '<span class="t-prompt">$ </span>';
+    else if (i >= 2) {
+      const typed = cmd.slice(2, i + 1);
+      cmdDiv.innerHTML = `<span class="t-prompt">$ </span><span class="t-cmd">${typed}</span>`;
     }
-
-    await sleep(line.delay || 300);
-    body.scrollTop = body.scrollHeight;
+    await sleep(i < 2 ? 0 : 35);
   }
+  await sleep(500);
 
-  await sleep(4000);
+  body.appendChild(Object.assign(document.createElement('div'), { className: 'term-line' }));
+
+  // Spinner: Syncing wallet
+  const sp1 = startSpinner(body, 'Syncing wallet...');
+  await sleep(2200);
+  sp1.stop(`  <span class="t-green">✓</span> Synced <span class="t-dim">${sp1.elapsed()}s</span>`);
+  await sleep(300);
+
+  // Static: Spendable balance
+  const balDiv = document.createElement('div');
+  balDiv.className = 'term-line';
+  balDiv.innerHTML = `  Spendable: <span class="t-cyan">1596656000 zat (15.9666 ZEC)</span>`;
+  body.appendChild(balDiv);
+  await sleep(400);
+
+  // Spinner: Sending shielded payment
+  const sp2 = startSpinner(body, 'Sending 42000 zat...');
+  await sleep(3000);
+  sp2.stop(`  <span class="t-green">✓</span> Broadcast: <span class="t-dim">a66188bb...91091354</span>`);
+  body.scrollTop = body.scrollHeight;
+  await sleep(300);
+
+  // Spinner: Awaiting confirmation
+  const sp3 = startSpinner(body, 'Awaiting confirmation');
+  await sleep(2800);
+  sp3.stop(`  <span class="t-green">✓</span> Confirmed <span class="t-dim">${sp3.elapsed()}s</span>`);
+  await sleep(200);
+
+  // Spinner: Retrying with credential
+  const sp4 = startSpinner(body, 'Retrying with credential...');
+  await sleep(800);
+  sp4.stop(`  <span class="t-green">✓</span> <span class="t-yellow">200</span> Payment-Receipt verified`);
+  await sleep(200);
+
+  body.appendChild(Object.assign(document.createElement('div'), { className: 'term-line' }));
+
+  // Fortune output
+  const out = document.createElement('div');
+  out.className = 'term-line';
+  out.innerHTML = `<span class="t-cyan">"A shielded transaction brings peace of mind."</span>`;
+  body.appendChild(out);
+  await sleep(600);
+
+  body.appendChild(Object.assign(document.createElement('div'), { className: 'term-line' }));
+
+  // Final prompt
+  const prompt = document.createElement('div');
+  prompt.className = 'term-line';
+  prompt.innerHTML = `<span class="t-prompt">$ </span><span class="term-cursor"></span>`;
+  body.appendChild(prompt);
+  body.scrollTop = body.scrollHeight;
+
+  await sleep(5000);
   runDemo();
 }
 
