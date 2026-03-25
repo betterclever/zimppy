@@ -183,11 +183,14 @@ async fn main() -> Result<(), WalletError> {
 
             for attempt in 0..=max_attempts {
                 if attempt > 0 {
-                    let elapsed = started.elapsed().as_secs();
-                    sp.set_message(format!(
-                        "Waiting for prior change to mature... {}s elapsed", elapsed
-                    ));
-                    tokio::time::sleep(POLL_INTERVAL).await;
+                    // Wait POLL_INTERVAL but update elapsed every second
+                    for _ in 0..POLL_INTERVAL.as_secs() {
+                        let elapsed = started.elapsed().as_secs();
+                        sp.set_message(format!(
+                            "Waiting for prior change to mature... {}s elapsed", elapsed
+                        ));
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
                     wallet.sync().await?;
                     let b = wallet.balance().await?;
                     if b.total_zat < amount + 10_000 {
@@ -275,19 +278,23 @@ async fn wait_for_maturity(
     let started = std::time::Instant::now();
     let est_secs = min_conf as u64 * 75; // estimated time for min_conf blocks
 
+    let mut last_bal: Option<zimppy_wallet::WalletBalance> = None;
     for _attempt in 1..=max_polls {
-        tokio::time::sleep(POLL_INTERVAL).await;
+        // Wait POLL_INTERVAL but update elapsed every second
+        for _ in 0..POLL_INTERVAL.as_secs() {
+            let elapsed = started.elapsed().as_secs();
+            let remaining = est_secs.saturating_sub(elapsed);
+            let status = match &last_bal {
+                Some(b) if b.pending_zat > 0 => format!(
+                    "Confirming... {}s elapsed, ~{}s remaining", elapsed, remaining
+                ),
+                _ => format!("Waiting for maturity... {}s elapsed", elapsed),
+            };
+            sp.set_message(status);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
         wallet.sync().await?;
         let bal = wallet.balance().await?;
-        let elapsed = started.elapsed().as_secs();
-        let remaining = est_secs.saturating_sub(elapsed);
-
-        if bal.pending_zat > 0 {
-            sp.set_message(format!("Confirming... {}s elapsed, ~{}s remaining",
-                elapsed, remaining));
-        } else {
-            sp.set_message(format!("Maturing... {}s elapsed", elapsed));
-        }
 
         if bal.spendable_zat >= needed {
             return Ok(());
@@ -303,6 +310,7 @@ async fn wait_for_maturity(
         } else {
             stale_count = 0;
         }
+        last_bal = Some(bal);
     }
     Ok(())
 }
