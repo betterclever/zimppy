@@ -26,6 +26,8 @@ const require = createRequire(import.meta.url)
 const { Mppx } = require('mppx/client') as typeof import('mppx/client')
 const { zcashClient, zcashSessionClient, isEventStream, parseEvent } = require('zimppy-ts') as typeof import('zimppy-ts')
 
+import { ui } from './ui.js'
+
 const VERSION = '0.1.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
 const WALLETS_DIR = join(CONFIG_DIR, 'wallets')
@@ -34,7 +36,6 @@ const SESSION_FILE = join(CONFIG_DIR, 'session.json')
 const DEFAULT_LWD = 'https://testnet.zec.rocks'
 const DEFAULT_RPC = 'https://zcash-testnet-zebrad.gateway.tatum.io'
 const DEFAULT_DEPOSIT = '100000' // 100,000 zat default session deposit
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 // ── Wallet NAPI ──────────────────────────────────────────────────
 
@@ -120,47 +121,13 @@ function clearSession(): void {
   }
 }
 
-function startProgress(label: string) {
-  const start = Date.now()
-  let frameIndex = 0
-  let message = label
-  const render = () => {
-    const elapsed = Math.round((Date.now() - start) / 1000)
-    process.stderr.write(`\r\x1b[K  \x1b[36m${SPINNER_FRAMES[frameIndex]}\x1b[0m ${message} \x1b[2m${elapsed}s\x1b[0m`)
-    frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length
-  }
-
-  render()
-  const timer = setInterval(render, 80)
-
-  return {
-    update(msg: string) {
-      message = msg
-    },
-    stop(msg?: string) {
-      clearInterval(timer)
-      const elapsed = Math.round((Date.now() - start) / 1000)
-      process.stderr.write(`\r\x1b[K  \x1b[32;1m✓\x1b[0m ${msg ?? label} \x1b[2m${elapsed}s\x1b[0m\n`)
-    },
-    fail(msg: string) {
-      clearInterval(timer)
-      const elapsed = Math.round((Date.now() - start) / 1000)
-      process.stderr.write(`\r\x1b[K  \x1b[31;1m✗\x1b[0m ${label} \x1b[2m${elapsed}s\x1b[0m\n`)
-      process.stderr.write(`    ${msg}\n`)
-    },
-  }
-}
-
-async function syncWalletWithProgress(
-  wallet: ZimppyWalletNapi,
-  label: string,
-): Promise<void> {
-  const progress = startProgress(label)
+async function syncWallet(wallet: ZimppyWalletNapi, label = 'Syncing'): Promise<void> {
+  const sp = ui.spinner(label)
   try {
     await wallet.ensureReady()
-    progress.stop(label)
+    sp.ok(label)
   } catch (error) {
-    progress.fail((error as Error).message)
+    sp.fail(label, (error as Error).message)
     throw error
   }
 }
@@ -256,7 +223,7 @@ async function walletWhoami(): Promise<void> {
   let wallet: ZimppyWalletNapi | null = null
   try {
     wallet = await openWallet(cfg)
-    await syncWalletWithProgress(wallet, 'Syncing wallet')
+    await syncWallet(wallet, 'Syncing wallet')
 
     const address = await wallet.address()
     const shortAddr = address.length > 50 ? `${address.slice(0, 25)}...${address.slice(-15)}` : address
@@ -286,7 +253,7 @@ async function walletBalance(): Promise<void> {
   let wallet: ZimppyWalletNapi | null = null
   try {
     wallet = await openWallet(cfg)
-    await syncWalletWithProgress(wallet, 'Syncing wallet')
+    await syncWallet(wallet, 'Syncing wallet')
 
     const bal = await wallet.balance()
 
@@ -383,7 +350,7 @@ async function waitForSpendable(
   const estSecs = minConf * 75
   let noProgressCount = 0
   const started = Date.now()
-  const progress = startProgress(label)
+  const progress = ui.spinner(label)
 
   for (let attempt = 1; attempt <= maxPolls; attempt++) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL_S * 1000))
@@ -401,7 +368,7 @@ async function waitForSpendable(
     }
 
     if (spendable >= needed) {
-      progress.stop('Confirmed')
+      progress.ok('Confirmed')
       return
     }
 
@@ -452,11 +419,10 @@ async function walletSend(args: string[]): Promise<void> {
     if (minConf !== undefined) {
       await wallet.setMinConfirmations(minConf)
     }
-    await syncWalletWithProgress(wallet, 'Syncing')
+    await syncWallet(wallet, 'Syncing')
 
     const bal = await wallet.balance()
-    const spendZec = (Number(bal.spendableZat) / 100_000_000).toFixed(4)
-    console.error(`  Spendable: \x1b[36m${bal.spendableZat} zat (${spendZec} ZEC)\x1b[0m`)
+    ui.info('Spendable', ui.zat(Number(bal.spendableZat)))
 
     const effectiveMinConf = minConf ?? 3
     const maxRetries = Math.max(24, Math.ceil((effectiveMinConf * BLOCK_TIME_S * 2) / POLL_INTERVAL_S))
@@ -464,7 +430,7 @@ async function walletSend(args: string[]): Promise<void> {
     const shortAddr = to.length > 40 ? `${to.slice(0, 20)}...${to.slice(-12)}` : to
     let txid: string | null = null
     const sendStarted = Date.now()
-    const sp = startProgress(`Sending ${amountZat} zat to ${shortAddr}`)
+    const sp = ui.spinner(`Sending ${amountZat} zat to ${shortAddr}`)
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
@@ -494,20 +460,19 @@ async function walletSend(args: string[]): Promise<void> {
     sp.stop()
 
     if (!txid) {
-      console.error('\x1b[31;1m✗\x1b[0m Timed out waiting for change to mature')
+      ui.fail('Timed out waiting for change to mature')
       process.exit(1)
     }
-    console.error(`  \x1b[32;1m✓\x1b[0m Broadcast: \x1b[2m${txid}\x1b[0m`)
+    ui.ok(`Broadcast: ${txid}`)
 
     // Post-send: wait for this tx's change to mature (unless --no-wait)
     if (!noWait) {
       await waitForSpendable(wallet, 'Awaiting confirmation', needed, effectiveMinConf)
       const postBal = await wallet.balance()
-      const zec = (Number(postBal.spendableZat) / 100_000_000).toFixed(4)
-      console.error(`  Spendable: \x1b[36m${postBal.spendableZat} zat (${zec} ZEC)\x1b[0m`)
+      ui.info('Spendable', ui.zat(Number(postBal.spendableZat)))
     }
 
-    console.error('  \x1b[32;1m✓\x1b[0m Send complete.')
+    ui.ok('Send complete.')
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
     process.exit(1)
@@ -608,7 +573,7 @@ async function walletServices(args: string[]): Promise<void> {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 async function waitForConfirmation(cfg: ZimppyConfig, txid: string): Promise<void> {
-  const sp = startProgress('Waiting for block confirmation')
+  const sp = ui.spinner('Waiting for block confirmation')
   const estSecs = 75
 
   for (let i = 0; i < 20; i++) {
@@ -623,33 +588,33 @@ async function waitForConfirmation(cfg: ZimppyConfig, txid: string): Promise<voi
       })
       const data = await resp.json() as { result?: { confirmations?: number } }
       if (data.result?.confirmations && data.result.confirmations > 0) {
-        sp.stop(`Confirmed (${data.result.confirmations} confirmations)`)
+        sp.ok(`Confirmed (${data.result.confirmations} confirmations)`)
         return
       }
     } catch { /* keep polling */ }
   }
-  sp.stop('Confirmation timeout — tx may still confirm later')
+  sp.ok('Confirmation timeout — tx may still confirm later')
 }
 
 async function sendViaWallet(cfg: ZimppyConfig, params: { to: string; amountZat: string; memo: string }): Promise<string> {
   let wallet: ZimppyWalletNapi | null = null
   try {
     wallet = await openWallet(cfg)
-    await syncWalletWithProgress(wallet, 'Syncing wallet')
+    await syncWallet(wallet, 'Syncing wallet')
 
-    const sp = startProgress(`Sending ${params.amountZat} zat`)
+    const sp = ui.spinner(`Sending ${params.amountZat} zat`)
     let txid: string
     try {
       txid = await wallet.send(params.to, params.amountZat, params.memo)
-      sp.stop('Broadcast')
+      sp.ok('Broadcast')
     } catch (error) {
       sp.fail((error as Error).message)
       throw error
     }
-    console.error(`  \x1b[32;1m✓\x1b[0m txid: \x1b[2m${txid.slice(0, 16)}...${txid.slice(-8)}\x1b[0m`)
+    ui.ok(`txid: ${txid.slice(0, 16)}...${txid.slice(-8)}`)
 
     await waitForConfirmation(cfg, txid)
-    await syncWalletWithProgress(wallet, 'Post-confirmation sync')
+    await syncWallet(wallet, 'Post-confirmation sync')
 
     return txid
   } finally {
