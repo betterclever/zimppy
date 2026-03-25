@@ -11,6 +11,16 @@
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
+    /* Thin dark scrollbars */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #2a2a3a transparent;
+    }
+    *::-webkit-scrollbar { width: 6px; height: 6px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+    *::-webkit-scrollbar-thumb:hover { background: #3a3a4a; }
+
     :root {
       --bg: #08080b;
       --bg-card: #0f0f14;
@@ -267,7 +277,7 @@
     /* ── Verify ── */
     .vf-flow {
       display: flex; flex-direction: column; gap: 0; max-width: 700px;
-      position: relative;
+      position: relative; min-height: 520px;
     }
     .vf-flow::before {
       content: ''; position: absolute; left: 23px; top: 24px; bottom: 24px;
@@ -361,6 +371,119 @@
     .sess-tag.chain { background: rgba(251,191,36,0.1); color: var(--yellow); }
     .sess-tag.instant { background: rgba(110,231,183,0.1); color: var(--green); }
 
+    /* Session demo */
+    .sess-demo { margin-top: 2rem; }
+    .sess-demo-layout {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+      align-items: start;
+    }
+    .sess-balance-panel {
+      padding: 1.25rem; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg-card);
+    }
+    .sess-bal-label {
+      font-family: var(--mono); font-size: 0.7rem; color: var(--text-3);
+      text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem;
+    }
+    .sess-bal-amount {
+      font-family: var(--mono); font-size: 1.8rem; font-weight: 600;
+      color: var(--cyan); margin-bottom: 0.5rem;
+      transition: color 0.3s;
+    }
+    .sess-bal-amount.low { color: var(--yellow); }
+    .sess-bal-amount.empty { color: var(--red); }
+    .sess-bar-track {
+      height: 8px; border-radius: 4px; background: var(--border);
+      overflow: hidden; margin-bottom: 1rem;
+    }
+    .sess-bar-fill {
+      height: 100%; border-radius: 4px; background: var(--green);
+      transition: width 0.15s linear, background 0.3s;
+    }
+    .sess-bar-fill.low { background: var(--yellow); }
+    .sess-bar-fill.empty { background: var(--red); }
+    .sess-log {
+      font-family: var(--mono); font-size: 0.72rem; color: var(--text-2);
+      line-height: 1.7; height: 120px; overflow-y: auto;
+    }
+    .sess-stream-scroll {
+      font-size: 0.72rem; line-height: 1.65;
+      height: 160px; overflow-y: auto;
+      font-family: var(--mono); color: var(--text-2);
+    }
+    .sess-log .log-entry { padding: 0.1rem 0; }
+    .sess-phase {
+      font-family: var(--mono); font-size: 0.68rem; font-weight: 500;
+      padding: 0.2rem 0.5rem; border-radius: 4px; display: inline-block;
+      margin-bottom: 0.75rem;
+    }
+    .sess-phase.deposit { background: rgba(251,191,36,0.1); color: var(--yellow); }
+    .sess-phase.streaming { background: rgba(110,231,183,0.1); color: var(--green); }
+    .sess-phase.topup { background: rgba(251,191,36,0.1); color: var(--yellow); }
+    .sess-phase.closed { background: rgba(167,139,250,0.1); color: var(--accent); }
+    .sess-stream-panel {
+      padding: 1.25rem; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg-code);
+      font-family: var(--mono); font-size: 0.78rem;
+      color: var(--text-2); line-height: 1.7;
+      min-height: 280px;
+    }
+    .sess-stream-label {
+      font-size: 0.68rem; color: var(--text-3); margin-bottom: 0.75rem;
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .sess-token-cost {
+      font-family: var(--mono); font-size: 0.65rem; color: var(--text-3);
+      margin-top: 0.75rem;
+    }
+    .sess-unified {
+      border: 1px solid var(--border); border-radius: 12px;
+      background: var(--bg-card); padding: 1.5rem; margin-top: 2rem;
+    }
+    .sess-steps {
+      display: flex; gap: 0; margin-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border); padding-bottom: 1rem;
+    }
+    .sess-step {
+      flex: 1; display: flex; align-items: flex-start; gap: 0.5rem;
+      font-family: var(--mono); font-size: 0.68rem; color: var(--text-3);
+      position: relative;
+    }
+    .sess-step-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      border: 2px solid var(--border); background: var(--bg);
+      display: inline-block; transition: all 0.3s;
+      margin-top: 4px; flex-shrink: 0;
+    }
+    .sess-step.active .sess-step-dot {
+      border-color: var(--accent); background: var(--accent);
+      box-shadow: 0 0 8px rgba(167,139,250,0.4);
+    }
+    .sess-step.active { color: var(--text); }
+    .sess-step.done .sess-step-dot {
+      border-color: var(--green); background: var(--green);
+    }
+    .sess-step.done { color: var(--text-2); }
+    .sess-step-name { font-weight: 600; font-size: 0.72rem; }
+    .sess-step-desc { font-size: 0.62rem; color: var(--text-3); margin-top: 0.1rem; }
+    .sess-step.active .sess-step-desc { color: var(--text-2); }
+    .sess-balance-row {
+      display: flex; align-items: center; gap: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .sess-bal-left { flex-shrink: 0; display: flex; align-items: center; gap: 1rem; }
+    .sess-bal-right { flex: 1; }
+    .sess-bal-amount { font-family: var(--mono); font-size: 1.4rem; font-weight: 600; color: var(--cyan); transition: color 0.3s; }
+    .sess-bal-amount.low { color: var(--yellow); }
+    .sess-bal-amount.empty { color: var(--red); }
+    .sess-divider {
+      height: 1px; background: var(--border); margin: 1rem 0;
+    }
+    .sess-section-title {
+      font-family: var(--mono); font-size: 0.65rem; color: var(--text-3);
+      text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem;
+    }
+
     /* ── CLI ── */
     .cli-grid {
       display: grid; grid-template-columns: 1fr 1fr; gap: 3rem;
@@ -382,15 +505,22 @@
 
     /* ── Footer ── */
     footer {
-      border-top: 1px solid var(--border); padding: 2rem 0;
+      border-top: 1px solid var(--border); padding: 2.5rem 0 2rem;
     }
     .foot-inner {
-      display: flex; justify-content: space-between; align-items: center;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      flex-wrap: wrap; gap: 1.5rem;
     }
     .foot-l {
       font-family: var(--mono); font-size: 0.75rem; color: var(--text-3);
     }
     .foot-l em { font-style: normal; color: var(--accent); }
+    .foot-credit {
+      font-family: var(--mono); font-size: 0.7rem; color: var(--text-3);
+      margin-top: 0.5rem;
+    }
+    .foot-credit a { color: var(--text-3); text-decoration: none; }
+    .foot-credit a:hover { color: var(--text-2); }
     .foot-links { display: flex; gap: 1.25rem; list-style: none; }
     .foot-links a {
       color: var(--text-3); text-decoration: none; font-size: 0.78rem;
@@ -723,97 +853,39 @@ console.<span class="fn">log</span>(<span class="kw">await</span> res.<span clas
   <section id="sessions" class="s-border">
     <div class="s-label">Sessions</div>
     <div class="s-title">Deposit once, instant bearer requests</div>
-    <div class="session-grid">
-      <div class="sess-card">
-        <div class="sess-num">1. Open</div>
-        <h4>Deposit ZEC</h4>
-        <p>Client sends a shielded deposit and a bearer secret. Server creates the session.</p>
-        <span class="sess-tag chain">on-chain</span>
-      </div>
-      <div class="sess-card">
-        <div class="sess-num">2. Bearer</div>
-        <h4>Instant requests</h4>
-        <p>Every request uses the bearer token. Server deducts from balance. No chain needed.</p>
-        <span class="sess-tag instant">instant</span>
-      </div>
-      <div class="sess-card">
-        <div class="sess-num">3. Top Up</div>
-        <h4>Add more ZEC</h4>
-        <p>Balance low? Send another shielded deposit. Session continues without interruption.</p>
-        <span class="sess-tag chain">on-chain</span>
-      </div>
-      <div class="sess-card">
-        <div class="sess-num">4. Close</div>
-        <h4>Get refund</h4>
-        <p>Close the session. Server refunds unused balance back to the client's address.</p>
-        <span class="sess-tag chain">on-chain</span>
-      </div>
-    </div>
-    <div class="int-card" style="margin-top: 1.5rem;">
-      <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab(this, 'sess-srv')">Server</button>
-        <button class="tab-btn" onclick="switchTab(this, 'sess-cli')">Client</button>
-        <button class="tab-btn" onclick="switchTab(this, 'sess-sse')">SSE Streaming</button>
-      </div>
-      <div id="sess-srv" class="tab-panel active">
-        <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/server'</span>
-<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
+    <div class="sess-demo">
+      <div class="sess-unified">
+        <!-- Step markers -->
+        <div id="sess-steps" class="sess-steps">
+          <div class="sess-step" data-s="open"><span class="sess-step-dot"></span><div><div class="sess-step-name">1. Open</div><div class="sess-step-desc">Shielded deposit</div></div></div>
+          <div class="sess-step" data-s="query"><span class="sess-step-dot"></span><div><div class="sess-step-name">2. Query</div><div class="sess-step-desc">Stream results</div></div></div>
+          <div class="sess-step" data-s="topup"><span class="sess-step-dot"></span><div><div class="sess-step-name">3. Top Up</div><div class="sess-step-desc">Add more ZEC</div></div></div>
+          <div class="sess-step" data-s="query2"><span class="sess-step-dot"></span><div><div class="sess-step-name">4. Query</div><div class="sess-step-desc">Stream results</div></div></div>
+          <div class="sess-step" data-s="close"><span class="sess-step-dot"></span><div><div class="sess-step-name">5. Close</div><div class="sess-step-desc">Refund balance</div></div></div>
+        </div>
 
-<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({
-  methods: [<span class="kw">await</span> zcash.<span class="fn">session</span>({
-    wallet: <span class="str">'server'</span>,
-    suggestedDeposit: <span class="num">100000</span>,
-    unitType: <span class="str">'request'</span>,
-  })],
-})
+        <!-- Balance -->
+        <div class="sess-balance-row">
+          <div id="sess-bal" class="sess-bal-amount">0 zat</div>
+          <div class="sess-bal-right">
+            <div class="sess-bar-track"><div id="sess-bar" class="sess-bar-fill" style="width:0%"></div></div>
+            <div id="sess-token-cost" class="sess-token-cost"></div>
+          </div>
+        </div>
 
-<span class="kw">const</span> result = <span class="kw">await</span> mppx.<span class="fn">session</span>({
-  amount: <span class="str">'5000'</span>,
-  unitType: <span class="str">'request'</span>,
-})(request)
+        <div class="sess-divider"></div>
 
-<span class="kw">if</span> (result.status === <span class="num">402</span>) <span class="kw">return</span> result.challenge
-<span class="kw">return</span> result.<span class="fn">withReceipt</span>(Response.<span class="fn">json</span>({ data }))</pre></div>
-      </div>
-      <div id="sess-cli" class="tab-panel">
-        <div class="int-code"><pre><span class="kw">import</span> { Mppx } <span class="kw">from</span> <span class="str">'mppx/client'</span>
-<span class="kw">import</span> { zcash } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
+        <!-- Event log -->
+        <div class="sess-section-title">Event log</div>
+        <div id="sess-log" class="sess-log"></div>
 
-<span class="kw">const</span> session = zcash.<span class="fn">session</span>({ wallet: <span class="str">'default'</span> })
+        <div class="sess-divider"></div>
 
-<span class="kw">const</span> mppx = Mppx.<span class="fn">create</span>({ methods: [session] })
-
-<span class="cm">// First fetch deposits, subsequent fetches use bearer</span>
-<span class="kw">const</span> r1 = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)  <span class="cm">// deposit on-chain</span>
-<span class="kw">const</span> r2 = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)  <span class="cm">// instant bearer</span>
-<span class="kw">const</span> r3 = <span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)  <span class="cm">// instant bearer</span>
-
-<span class="cm">// Done — close and get refund</span>
-session.<span class="fn">close</span>()
-<span class="kw">await</span> mppx.<span class="fn">fetch</span>(url)</pre></div>
-      </div>
-      <div id="sess-sse" class="tab-panel">
-        <div class="int-code"><pre><span class="kw">import</span> { serveStream, toResponse } <span class="kw">from</span> <span class="str">'zimppy-ts/server'</span>
-
-<span class="cm">// Server: metered LLM token streaming</span>
-<span class="kw">const</span> stream = <span class="fn">serveStream</span>({
-  generate: llm.<span class="fn">stream</span>(prompt),
-  sessionId,
-  tickCost: <span class="num">100</span>,    <span class="cm">// 100 zat per token</span>
-  deduct, getBalance,
-  signal: request.signal,
-})
-
-<span class="kw">return</span> <span class="fn">toResponse</span>(stream)
-
-<span class="cm">// Client: consume the stream</span>
-<span class="kw">import</span> { iterateData, isEventStream } <span class="kw">from</span> <span class="str">'zimppy-ts/client'</span>
-
-<span class="kw">if</span> (<span class="fn">isEventStream</span>(response)) {
-  <span class="kw">for await</span> (<span class="kw">const</span> token <span class="kw">of</span> <span class="fn">iterateData</span>(response)) {
-    process.stdout.<span class="fn">write</span>(token)
-  }
-}</pre></div>
+        <!-- Query output -->
+        <div class="sess-section-title">Query output</div>
+        <div id="sess-stream-label" class="sess-stream-label"></div>
+        <div id="sess-stream" class="sess-stream-scroll"></div>
+        <div id="sess-phase" style="display:none"></div>
       </div>
     </div>
   </section>
@@ -824,26 +896,27 @@ session.<span class="fn">close</span>()
   <section id="cli" class="s-border">
     <div class="s-label">CLI</div>
     <div class="s-title">npx zimppy</div>
+    <p style="color: var(--text-2); margin-bottom: 1.5rem;">Agent-native wallet. Full MPP spec support. One command to pay any 402 endpoint.</p>
     <div class="cli-grid">
       <div class="cli-cmds">
         <div class="cli-cmd">
-          <h3>Check your wallet</h3>
-          <p>Address, balance, and network — synced with the blockchain.</p>
+          <h3>Wallet identity</h3>
+          <p>Shielded address, balance, network status. Ready for agents.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet whoami</span></div>
         </div>
         <div class="cli-cmd">
-          <h3>Pay for an API call</h3>
-          <p>Auto-discovers pricing, sends shielded payment, retries with credential.</p>
+          <h3>MPP charge + session</h3>
+          <p>Auto-discovers 402 pricing, handles charge or session flow, retries with credential.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy request https://fortune.api.dev/fortune</span></div>
         </div>
         <div class="cli-cmd">
-          <h3>Send ZEC directly</h3>
-          <p>Send shielded ZEC with confirmation waiting and live elapsed timer.</p>
+          <h3>Shielded transfers</h3>
+          <p>Send ZEC with full shielded privacy. Sender, receiver, amount all encrypted.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet send &lt;addr&gt; 42000</span></div>
         </div>
         <div class="cli-cmd">
-          <h3>Multiple wallets</h3>
-          <p>Separate identities for different agents or environments.</p>
+          <h3>Multi-agent wallets</h3>
+          <p>Isolated identities per agent, environment, or task. Switch in one command.</p>
           <div class="cli-snippet"><span class="t-prompt">$ </span><span class="t-cmd">npx zimppy wallet use work</span></div>
         </div>
       </div>
@@ -883,7 +956,10 @@ session.<span class="fn">close</span>()
 <footer>
   <div class="w">
     <div class="foot-inner">
-      <div class="foot-l"><em>zimppy</em> &mdash; private machine payments on Zcash</div>
+      <div>
+        <div class="foot-l"><em>zimppy</em> &mdash; private machine payments on Zcash</div>
+        <div class="foot-credit">MIT License &middot; Made with <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--red)" style="vertical-align:-1px"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg> by <a href="https://github.com/betterclever" target="_blank"><svg width="18" height="18" viewBox="0 0 14 14" style="vertical-align:-4px" shape-rendering="crispEdges"><rect x="3" y="0" width="8" height="2" fill="#333"/><rect x="1" y="2" width="12" height="2" fill="#333"/><rect x="0" y="4" width="14" height="2" fill="#333"/><rect x="4" y="4" width="2" height="2" fill="#fff"/><rect x="8" y="4" width="2" height="2" fill="#fff"/><rect x="2" y="6" width="10" height="2" fill="#333"/><rect x="3" y="8" width="8" height="2" fill="#555"/><rect x="4" y="10" width="2" height="4" fill="#333"/><rect x="8" y="10" width="2" height="4" fill="#333"/></svg> betterclever</a> and <a href="https://claude.ai" target="_blank"><svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px" fill="currentColor"><path d="m3.127 10.604 3.135-1.76.053-.153-.053-.085H6.11l-.525-.032-1.791-.048-1.554-.065-1.505-.08-.38-.081L0 7.832l.036-.234.32-.214.455.04 1.009.069 1.513.105 1.097.064 1.626.17h.259l.036-.105-.089-.065-.068-.064-1.566-1.062-1.695-1.121-.887-.646-.48-.327-.243-.306-.104-.67.435-.48.585.04.15.04.593.456 1.267.981 1.654 1.218.242.202.097-.068.012-.049-.109-.181-.9-1.626-.96-1.655-.428-.686-.113-.411a2 2 0 0 1-.068-.484l.496-.674L4.446 0l.662.089.279.242.411.94.666 1.48 1.033 2.014.302.597.162.553.06.17h.105v-.097l.085-1.134.157-1.392.154-1.792.052-.504.25-.605.497-.327.387.186.319.456-.045.294-.19 1.23-.37 1.93-.243 1.29h.142l.161-.16.654-.868 1.097-1.372.484-.545.565-.601.363-.287h.686l.505.751-.226.775-.707.895-.585.759-.839 1.13-.524.904.048.072.125-.012 1.897-.403 1.024-.186 1.223-.21.553.258.06.263-.218.536-1.307.323-1.533.307-2.284.54-.028.02.032.04 1.029.098.44.024h1.077l2.005.15.525.346.315.424-.053.323-.807.411-3.631-.863-.872-.218h-.12v.073l.726.71 1.331 1.202 1.667 1.55.084.383-.214.302-.226-.032-1.464-1.101-.565-.497-1.28-1.077h-.084v.113l.295.432 1.557 2.34.08.718-.112.234-.404.141-.444-.08-.911-1.28-.94-1.44-.759-1.291-.093.053-.448 4.821-.21.246-.484.186-.403-.307-.214-.496.214-.98.258-1.28.21-1.016.19-1.263.112-.42-.008-.028-.092.012-.953 1.307-1.448 1.957-1.146 1.227-.274.109-.477-.247.045-.44.266-.39 1.586-2.018.956-1.25.617-.723-.004-.105h-.036l-4.212 2.736-.75.096-.324-.302.04-.496.154-.162 1.267-.871z"/></svg> Claude</a></div>
+      </div>
       <ul class="foot-links">
         <li><a href="https://github.com/betterclever/zimppy" target="_blank">GitHub</a></li>
         <li><a href="https://mpp.dev" target="_blank">MPP Spec</a></li>
@@ -1019,7 +1095,7 @@ async function runDemo() {
   await sleep(400);
 
   // ── User asks to translate a confidential NDA ──
-  addLine(body, `<span class="t-accent">&gt;</span> translate this NDA from mandarin to english`);
+  addLine(body, `<span class="t-accent">&gt;</span> translate this NDA to english: <span class="t-dim">甲方不得向任何第三方披露半导体部门的收购价格...</span>`);
   await sleep(600);
   addLine(body, '');
 
@@ -1030,8 +1106,8 @@ async function runDemo() {
   sp0.stop(`  <span class="t-green">\u2713</span> found <span class="t-cyan">2 services</span>`);
   await sleep(200);
   addLine(body, '');
-  addLine(body, `  <span class="t-cyan">translate.api.dev</span>    <span class="t-dim">142 langs</span>   <span class="t-green">20,000 zat</span>`);
-  addLine(body, `  <span class="t-cyan">linguo.api.dev</span>       <span class="t-dim">36 langs</span>     <span class="t-green">8,000 zat</span>`);
+  addLine(body, `  <span class="t-cyan">translate.api.dev</span>  <span class="t-dim">142 langs</span>  <span class="t-green">200 zat/word</span>  <span class="t-dim">deposit</span> <span class="t-cyan">50,000</span>`);
+  addLine(body, `  <span class="t-cyan">linguo.api.dev</span>     <span class="t-dim">36 langs</span>   <span class="t-green">350 zat/word</span>  <span class="t-dim">deposit</span> <span class="t-cyan">30,000</span>`);
   addLine(body, `  <span class="t-dim">\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</span>`);
   await sleep(400);
   addLine(body, '');
@@ -1040,51 +1116,56 @@ async function runDemo() {
   await sleep(500);
   addLine(body, '');
 
-  // Payment
-  addLine(body, `  <span class="t-dim">\u2500\u2500\u2500 zimppy request translate.api.dev \u2500\u2500\u2500</span>`);
-  addLine(body, `  <span class="t-yellow">402</span> <span class="t-dim">zcash charge</span> <span class="t-cyan">20,000 zat</span> <span class="t-dim">(~$0.05)</span>`);
+  // Session open — deposit once on-chain
+  addLine(body, `  <span class="t-dim">\u2500\u2500\u2500 zimppy session translate.api.dev \u2500\u2500\u2500</span>`);
+  addLine(body, `  <span class="t-yellow">402</span> <span class="t-dim">zcash session</span> <span class="t-cyan">50,000 zat</span> <span class="t-dim">deposit (~$0.12)</span>`);
   await sleep(300);
 
-  const sp1 = startSpinner(body, '<span class="t-dim">shielded payment</span>');
+  const sp1 = startSpinner(body, '<span class="t-dim">shielded deposit</span>');
   await sleep(2000);
-  sp1.stop(`  <span class="t-green">\u2713</span> paid <span class="t-dim">c7f3a1e2...4d9b</span>`);
+  sp1.stop(`  <span class="t-green">\u2713</span> deposited <span class="t-dim">c7f3a1e2...4d9b</span>`);
   await sleep(200);
 
   const sp2 = startSpinner(body, '<span class="t-dim">on-chain confirmation</span>');
   await sleep(2200);
-  sp2.stop(`  <span class="t-green">\u2713</span> confirmed <span class="t-dim">${sp2.elapsed()}s</span>`);
+  sp2.stop(`  <span class="t-green">\u2713</span> session opened <span class="t-dim">${sp2.elapsed()}s</span>`);
   await sleep(200);
 
-  addLine(body, `  <span class="t-green">\u2713</span> <span class="t-yellow">200</span> receipt verified`);
+  addLine(body, `  <span class="t-green">\u2713</span> bearer token active <span class="t-dim">\u00b7 balance 50,000 zat</span>`);
   addLine(body, `  <span class="t-dim">\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</span>`);
   await sleep(400);
   addLine(body, '');
 
-  // Streamed translation
-  addLine(body, `<span class="t-cyan">\u25c6</span> Translation:`);
+  // Streamed translation via bearer — pay per word
+  addLine(body, `<span class="t-cyan">\u25c6</span> Streaming via bearer <span class="t-dim">\u00b7 200 zat/word</span>`);
   await sleep(200);
   addLine(body, '');
-  const lines = [
-    '"Party A shall not disclose the acquisition',
-    'price of the semiconductor division to any',
-    'third party, including but not limited to',
-    'employees, advisors, or affiliates of Party B,',
-    'without prior written consent..."',
+  const words = [
+    '"Party', 'A', 'shall', 'not', 'disclose', 'the', 'acquisition',
+    'price', 'of', 'the', 'semiconductor', 'division', 'to', 'any',
+    'third', 'party,', 'including', 'but', 'not', 'limited', 'to',
+    'employees,', 'advisors,', 'or', 'affiliates', 'of', 'Party', 'B,',
+    'without', 'prior', 'written', 'consent..."',
   ];
-  for (const line of lines) {
-    const div = addLine(body, '');
-    let html = '  ';
-    for (const ch of line) {
-      html += ch;
-      div.innerHTML = `<span class="t-dim">${html}</span>`;
-      body.scrollTop = body.scrollHeight;
-      await sleep(18);
-    }
-    await sleep(60);
+  const costPerWord = 200;
+  let totalCost = 0;
+  let balance = 50000;
+  const costDiv = addLine(body, `  <span class="t-dim">balance</span> <span class="t-cyan">50,000</span> <span class="t-dim">zat</span>`);
+  addLine(body, '');
+  const streamDiv = addLine(body, '');
+  let streamed = '  ';
+  for (const word of words) {
+    streamed += (streamed.length > 2 ? ' ' : '') + word;
+    totalCost += costPerWord;
+    balance -= costPerWord;
+    streamDiv.innerHTML = `<span class="t-dim">${streamed}</span>`;
+    costDiv.innerHTML = `  <span class="t-dim">balance</span> <span class="t-cyan">${balance.toLocaleString()}</span> <span class="t-dim">zat</span>  <span class="t-yellow">-${totalCost.toLocaleString()}</span>`;
+    body.scrollTop = body.scrollHeight;
+    await sleep(80);
   }
   await sleep(600);
   addLine(body, '');
-  addLine(body, `  <span class="t-dim">3 pages translated \u00b7 20,000 zat \u00b7 no metadata leaked</span>`);
+  addLine(body, `  <span class="t-dim">32 words \u00b7 ${totalCost.toLocaleString()} zat used \u00b7 ${balance.toLocaleString()} zat remaining</span>`);
   await sleep(800);
   addLine(body, '');
 
@@ -1104,6 +1185,209 @@ const observer = new IntersectionObserver((entries) => {
   }
 }, { threshold: 0.3 });
 observer.observe(document.getElementById('demo-term'));
+
+// ── Session demo animation ──
+async function runSessionDemo() {
+  const bal = document.getElementById('sess-bal');
+  const bar = document.getElementById('sess-bar');
+  const phase = document.getElementById('sess-phase');
+  const log = document.getElementById('sess-log');
+  const stream = document.getElementById('sess-stream');
+  const costDiv = document.getElementById('sess-token-cost');
+  const streamLabel = document.getElementById('sess-stream-label');
+  if (!bal) return;
+
+  const deposit = 5000;
+  let maxBal = deposit;
+  let balance = 0;
+  let totalCost = 0;
+  const costPerRow = 400;
+
+  function setBalance(v) {
+    balance = v;
+    bal.textContent = balance.toLocaleString() + ' zat';
+    const pct = Math.max(0, (balance / maxBal) * 100);
+    bar.style.width = pct + '%';
+    bar.className = 'sess-bar-fill' + (pct < 20 ? ' empty' : pct < 40 ? ' low' : '');
+    bal.className = 'sess-bal-amount' + (pct < 20 ? ' empty' : pct < 40 ? ' low' : '');
+  }
+
+  function setPhase(text, cls) {
+    phase.textContent = text;
+    phase.className = 'sess-phase ' + cls;
+  }
+
+  function addLog(html) {
+    const d = document.createElement('div');
+    d.className = 'log-entry';
+    d.innerHTML = html;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function addRow(html) {
+    const d = document.createElement('div');
+    d.innerHTML = html;
+    stream.appendChild(d);
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  const steps = document.querySelectorAll('#sess-steps .sess-step');
+  const stepOrder = ['open', 'query', 'topup', 'query2', 'close'];
+  function setStep(name) {
+    const idx = stepOrder.indexOf(name);
+    steps.forEach((s, i) => {
+      s.classList.remove('active', 'done');
+      if (i < idx) s.classList.add('done');
+      else if (i === idx) s.classList.add('active');
+    });
+  }
+
+  // Reset
+  log.innerHTML = '';
+  stream.innerHTML = '';
+  costDiv.innerHTML = '';
+  streamLabel.innerHTML = '';
+  setBalance(0);
+  setPhase('Waiting', 'deposit');
+  steps.forEach(s => s.classList.remove('active', 'done'));
+  await sleep(600);
+
+  // 1. Deposit
+  setStep('open');
+  setPhase('1. Open', 'deposit');
+  addLog('<span style="color:var(--yellow)">402</span> session required — deposit ' + deposit.toLocaleString() + ' zat');
+  await sleep(700);
+  addLog('<span style="color:var(--text-3)">shielded deposit...</span>');
+  await sleep(1400);
+  addLog('<span style="color:var(--green)">\u2713</span> confirmed <span style="color:var(--text-3)">c7f3a1...4d9b</span>');
+
+  for (let i = 0; i <= 20; i++) {
+    setBalance(Math.round((i / 20) * deposit));
+    await sleep(12);
+  }
+  await sleep(300);
+  addLog('<span style="color:var(--green)">\u2713</span> bearer active');
+  await sleep(500);
+
+  // 2. Query 1
+  setStep('query');
+  setPhase('2. Query', 'streaming');
+  addLog('');
+  addLog('<span style="color:var(--cyan)">POST</span> /query — bearer <span style="color:var(--green)">instant</span>');
+  await sleep(300);
+
+  streamLabel.innerHTML = '<span style="color:var(--cyan)">SELECT</span> region, SUM(revenue), COUNT(*) FROM transactions WHERE date >= \'2026-01\' GROUP BY region';
+
+  const q1Rows = [
+    ['us-east',   '2,847,102', '14,203'],
+    ['us-west',   '1,923,447', '9,871'],
+    ['eu-west',   '3,102,884', '16,442'],
+    ['eu-central','1,456,221', '7,891'],
+    ['ap-south',  '892,103',   '4,512'],
+    ['ap-east',   '2,231,556', '11,230'],
+    ['sa-east',   '447,882',   '2,341'],
+    ['af-south',  '312,091',   '1,672'],
+    ['me-south',  '678,443',   '3,401'],
+    ['us-central','1,102,334', '5,892'],
+  ];
+
+  addRow('<span style="color:var(--text-3)">region       revenue      count</span>');
+  addRow('<span style="color:var(--text-3)">\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</span>');
+
+  let rowCount = 0;
+  for (const [region, rev, cnt] of q1Rows) {
+    addRow(`<span style="color:var(--green)">${region.padEnd(13)}</span><span style="color:var(--cyan)">${rev.padStart(10)}</span>  <span style="color:var(--text-2)">${cnt.padStart(7)}</span>`);
+    totalCost += costPerRow;
+    rowCount++;
+    setBalance(balance - costPerRow);
+    costDiv.innerHTML = `${rowCount} rows \u00b7 <span style="color:var(--yellow)">${totalCost.toLocaleString()} zat</span>`;
+    await sleep(180);
+  }
+  await sleep(500);
+
+  addLog(`<span style="color:var(--green)">\u2713</span> ${q1Rows.length} rows \u00b7 ${(q1Rows.length * costPerRow).toLocaleString()} zat`);
+  await sleep(800);
+
+  // 3. Balance is low — top up
+  setStep('topup');
+  setPhase('3. Top Up', 'topup');
+  addLog('');
+  addLog('<span style="color:var(--yellow)">\u26a0</span> balance ' + balance.toLocaleString() + ' zat — depositing...');
+  await sleep(1000);
+  addLog('<span style="color:var(--green)">\u2713</span> deposited ' + deposit.toLocaleString() + ' zat');
+
+  const startBal = balance;
+  maxBal = startBal + deposit;
+  for (let i = 0; i <= 20; i++) {
+    setBalance(startBal + Math.round((i / 20) * deposit));
+    await sleep(12);
+  }
+  await sleep(300);
+  addLog('<span style="color:var(--green)">\u2713</span> session continues');
+  await sleep(500);
+
+  // 4. Query 2
+  setStep('query2');
+  setPhase('4. Query', 'streaming');
+  addLog('');
+  addLog('<span style="color:var(--cyan)">POST</span> /query — bearer <span style="color:var(--green)">instant</span>');
+  await sleep(300);
+
+  stream.innerHTML = '';
+  streamLabel.innerHTML = '<span style="color:var(--cyan)">SELECT</span> endpoint, p99_ms, error_rate FROM service_health WHERE status = \'degraded\'';
+
+  const q2Rows = [
+    ['/api/payments', '2,340',  '4.2%'],
+    ['/api/search',   '890',    '1.8%'],
+    ['/api/ingest',   '4,102',  '7.1%'],
+    ['/ws/stream',    '12,001', '0.3%'],
+    ['/api/auth',     '445',    '2.9%'],
+    ['/api/export',   '6,780',  '5.4%'],
+    ['/api/webhooks', '1,230',  '3.1%'],
+    ['/api/billing',  '3,401',  '6.8%'],
+  ];
+
+  addRow('<span style="color:var(--text-3)">endpoint        p99_ms  error_rate</span>');
+  addRow('<span style="color:var(--text-3)">\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</span>');
+
+  for (const [ep, p99, err] of q2Rows) {
+    const errColor = parseFloat(err) > 5 ? 'var(--red)' : parseFloat(err) > 3 ? 'var(--yellow)' : 'var(--green)';
+    addRow(`<span style="color:var(--text-2)">${ep.padEnd(16)}</span><span style="color:var(--cyan)">${p99.padStart(6)}</span>  <span style="color:${errColor}">${err.padStart(6)}</span>`);
+    totalCost += costPerRow;
+    rowCount++;
+    setBalance(balance - costPerRow);
+    costDiv.innerHTML = `${rowCount} rows \u00b7 <span style="color:var(--yellow)">${totalCost.toLocaleString()} zat</span>`;
+    await sleep(200);
+  }
+  await sleep(600);
+
+  addLog(`<span style="color:var(--green)">\u2713</span> ${q2Rows.length} rows \u00b7 ${(q2Rows.length * costPerRow).toLocaleString()} zat`);
+  await sleep(1000);
+
+  // 5. Close
+  setStep('close');
+  setPhase('5. Close', 'closed');
+  addLog('');
+  addLog('closing session...');
+  await sleep(700);
+  addLog(`<span style="color:var(--accent)">\u2713</span> refund <span style="color:var(--cyan)">${balance.toLocaleString()} zat</span>`);
+  setBalance(0);
+  await sleep(500);
+  addLog('<span style="color:var(--accent)">\u2713</span> session closed');
+
+  await sleep(5000);
+  runSessionDemo();
+}
+
+const sessObserver = new IntersectionObserver((entries) => {
+  if (entries[0].isIntersecting) {
+    sessObserver.disconnect();
+    runSessionDemo();
+  }
+}, { threshold: 0.3 });
+const sessEl = document.querySelector('.sess-demo');
+if (sessEl) sessObserver.observe(sessEl);
 </script>
 
 </body>
