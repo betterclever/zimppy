@@ -21,3 +21,10 @@ config/remote-chain-service.json
 *.pem
 *.key
 .vercel
+
+# Generated / non-source
+vendor/
+video/
+HANDOFF.md
+.claude/
+.playwright-mcp/
