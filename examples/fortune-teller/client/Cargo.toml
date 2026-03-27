@@ -9,7 +9,7 @@ name = "zimppy-rust-client"
 path = "src/main.rs"
 
 [dependencies]
-mpp = { git = "https://github.com/tempoxyz/mpp-rs", features = ["client"] }
+mpp = { version = "0.8.0", features = ["client"] }
 reqwest = { version = "0.12", features = ["json"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
