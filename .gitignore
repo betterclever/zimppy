@@ -20,3 +20,4 @@ config/remote-chain-service.json
 .env.*
 *.pem
 *.key
+.vercel

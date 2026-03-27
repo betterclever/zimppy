@@ -2951,6 +2951,7 @@ version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -3715,8 +3716,8 @@ dependencies = [
 
 [[package]]
 name = "pepper-sync"
-version = "0.2.0"
-source = "git+https://github.com/betterclever/zingolib.git?rev=0b428ae7#0b428ae7593db698cec06e1f2f5c484323d2aef8"
+version = "0.3.0"
+source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.1#31da83657d88fbb3b57bf45996023850e8aaf9da"
 dependencies = [
  "bip32",
  "byteorder",
@@ -8345,8 +8346,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "zimppy"
+version = "0.3.0"
+
+[[package]]
 name = "zimppy-ai-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -8365,7 +8370,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "bech32 0.9.1",
@@ -8391,7 +8396,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-napi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "napi",
  "napi-build",
@@ -8405,7 +8410,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-rs"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "futures-lite",
@@ -8421,7 +8426,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-rust-client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "mpp",
  "reqwest",
@@ -8434,7 +8439,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-rust-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -8450,7 +8455,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-wallet"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bip0039",
  "console",
@@ -8486,27 +8491,24 @@ dependencies = [
 
 [[package]]
 name = "zingo-netutils"
-version = "1.1.0"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3716e3f0352d80468ce2baef8a998ffeee8bdfe0aacc515eb8821e3147d4057e"
+checksum = "2d2ca11c717feb94a0032da1e6cffb2928ce2c34aca3b430e85cac02fd0ab425"
 dependencies = [
  "http",
- "http-body",
  "hyper",
  "hyper-rustls",
  "hyper-util",
  "thiserror 1.0.69",
  "tokio-rustls",
  "tonic",
- "tower",
- "webpki-roots 0.25.4",
  "zcash_client_backend",
 ]
 
 [[package]]
 name = "zingo-price"
 version = "0.0.1"
-source = "git+https://github.com/betterclever/zingolib.git?rev=0b428ae7#0b428ae7593db698cec06e1f2f5c484323d2aef8"
+source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.1#31da83657d88fbb3b57bf45996023850e8aaf9da"
 dependencies = [
  "byteorder",
  "reqwest",
@@ -8540,8 +8542,8 @@ dependencies = [
 
 [[package]]
 name = "zingolib"
-version = "3.0.0"
-source = "git+https://github.com/betterclever/zingolib.git?rev=0b428ae7#0b428ae7593db698cec06e1f2f5c484323d2aef8"
+version = "3.0.1"
+source = "git+https://github.com/zingolabs/zingolib.git?tag=zingolib_v3.0.1#31da83657d88fbb3b57bf45996023850e8aaf9da"
 dependencies = [
  "append-only-vec",
  "bech32 0.11.1",
@@ -8568,6 +8570,7 @@ dependencies = [
  "prost",
  "rand 0.8.5",
  "ring",
+ "rusqlite",
  "rust-embed",
  "rustls 0.23.37",
  "sapling-crypto",

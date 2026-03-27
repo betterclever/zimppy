@@ -1,0 +1,10 @@
+[package]
+name = "zimppy"
+version = "0.3.0"
+edition = "2021"
+description = "Private machine payments on Zcash — the Zcash payment method for MPP"
+license = "MIT"
+repository = "https://github.com/betterclever/zimppy"
+homepage = "https://zimppy.xyz"
+keywords = ["zcash", "mpp", "payments", "shielded", "privacy"]
+categories = ["cryptography", "web-programming"]
