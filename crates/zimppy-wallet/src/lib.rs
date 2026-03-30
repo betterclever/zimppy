@@ -374,7 +374,10 @@ impl ZimppyWallet {
             .rescan_and_await()
             .await
             .map_err(|e| WalletError::Sync(format!("rescan failed: {e}")))?;
-        // No manual save — background save_task handles persistence
+        if self.passphrase.is_some() {
+            self.client.wallet.write().await.save_required = true;
+            self.save().await?;
+        }
         Ok(())
     }
 
@@ -549,12 +552,23 @@ impl ZimppyWallet {
             "ensure_ready:end",
             format!("wallet_path={}", self.client.config().get_wallet_path().display()),
         );
-        // No manual save — let the background save_task handle persistence
-        // (matches zingo-cli behavior: never manually serialize wallet state)
+        // For encrypted wallets, save_task is disabled — persist checkpoints explicitly.
+        // For plaintext wallets, the background save_task handles persistence.
+        if self.passphrase.is_some() {
+            // Force save_required so save() actually writes.
+            self.client.wallet.write().await.save_required = true;
+            self.save().await?;
+        }
         Ok(())
     }
 
     async fn ensure_save_task(&mut self) {
+        // For encrypted wallets, never start zingolib's background save_task — it writes
+        // raw plaintext bytes directly to disk, bypassing our encryption layer.
+        // All persistence goes through ZimppyWallet::save() instead.
+        if self.passphrase.is_some() {
+            return;
+        }
         if !self.save_task_running {
             trace_wallet(
                 "save_task:start",
