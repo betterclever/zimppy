@@ -28,3 +28,4 @@ video/
 HANDOFF.md
 .claude/
 .playwright-mcp/
+.gstack/

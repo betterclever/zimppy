@@ -50,6 +50,8 @@ impl ZcashPaymentProvider {
             network: self.wallet_config.network,
             seed_phrase: self.wallet_config.seed_phrase.clone(),
             birthday_height: self.wallet_config.birthday_height,
+            account_index: self.wallet_config.account_index,
+            num_accounts: self.wallet_config.num_accounts,
         })
         .await
         .map_err(|e| MppError::InvalidConfig(format!("wallet open failed: {e}")))?;
@@ -172,6 +174,8 @@ mod tests {
                 network: NetworkType::Test,
                 seed_phrase: None,
                 birthday_height: None,
+                account_index: 0,
+                num_accounts: 1,
             },
             "https://rpc.example.com",
         );
