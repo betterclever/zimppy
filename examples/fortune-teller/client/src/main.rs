@@ -45,6 +45,9 @@ async fn main() {
             network: zcash_protocol::consensus::NetworkType::Test,
             seed_phrase: None,
             birthday_height: None,
+            account_index: 0,
+            num_accounts: 1,
+            passphrase: None,
         },
         &rpc_endpoint,
     );

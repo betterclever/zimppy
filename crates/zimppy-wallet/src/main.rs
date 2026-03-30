@@ -142,6 +142,7 @@ async fn main() -> Result<(), WalletError> {
                 birthday_height: birthday,
                 account_index: 0,
                 num_accounts,
+                passphrase: None,
             })
             .await?;
             sp.finish_and_clear();
@@ -399,6 +400,7 @@ async fn open_existing(
         birthday_height: None,
         account_index,
         num_accounts: 1,
+        passphrase: None,
     })
     .await
 }

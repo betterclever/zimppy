@@ -52,6 +52,7 @@ impl ZcashPaymentProvider {
             birthday_height: self.wallet_config.birthday_height,
             account_index: self.wallet_config.account_index,
             num_accounts: self.wallet_config.num_accounts,
+            passphrase: self.wallet_config.passphrase.clone(),
         })
         .await
         .map_err(|e| MppError::InvalidConfig(format!("wallet open failed: {e}")))?;
@@ -176,6 +177,7 @@ mod tests {
                 birthday_height: None,
                 account_index: 0,
                 num_accounts: 1,
+                passphrase: None,
             },
             "https://rpc.example.com",
         );

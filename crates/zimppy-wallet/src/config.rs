@@ -23,6 +23,9 @@ pub struct WalletConfig {
     pub account_index: u32,
     /// Number of accounts to derive from seed during init (default 1)
     pub num_accounts: u32,
+    /// Optional passphrase for encrypting the wallet file at rest.
+    /// If set on create, the file is encrypted. Must be provided on subsequent opens.
+    pub passphrase: Option<String>,
 }
 
 static TLS_INIT: Once = Once::new();

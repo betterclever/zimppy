@@ -5,7 +5,9 @@
 [![npm](https://img.shields.io/npm/v/zimppy-ts?label=zimppy-ts)](https://www.npmjs.com/package/zimppy-ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-The privacy stack for [MPP](https://mpp.dev). Zcash shielded transactions today, more privacy rails coming.
+**One deposit. Instant payments. Full privacy.**
+
+Zimppy is the [MPP](https://mpp.dev) payment method for Zcash. Deposit once on-chain, then make unlimited instant bearer requests with no per-request chain interaction. Every payment is shielded: sender, receiver, amount, and memo are all encrypted.
 
 [zimppy.xyz](https://zimppy.xyz)
 
@@ -22,59 +24,70 @@ zimppy-core = "0.3"         # Rust verification engine
 zimppy-rs = "0.3"           # Rust SDK (charge, session, axum)
 ```
 
-## What's included
+## Why shielded payments for agents
 
-- **Charge** — one shielded payment per request (HTTP 402)
-- **Sessions** — deposit once, instant bearer requests, close with refund
-- **Streaming** — pay-per-token metered content over SSE
-- **CLI** — `npx zimppy request` with automatic payment handling
-- **Dual SDK** — TypeScript and Rust
-- **Spec-compliant** — HMAC-SHA256 challenges, RFC 9457 errors, `/.well-known/payment` discovery
-
-## Why
-
-| | Public chains | zimppy |
+| | Public chains (USDC, ETH) | zimppy (ZEC) |
 |---|---|---|
-| Sender | Visible | Encrypted |
-| Receiver | Visible | Encrypted |
-| Amount | Visible | Encrypted |
-| Memo | Visible | Encrypted |
+| Sender | Visible on-chain | Encrypted |
+| Receiver | Visible on-chain | Encrypted |
+| Amount | Visible on-chain | Encrypted |
+| Memo | Visible on-chain | Encrypted |
+| Service usage pattern | Linkable | Private |
+
+For AI agents handling sensitive workflows — legal research, medical queries, financial analysis, competitive intelligence — every public payment is a metadata leak. Zimppy is the only MPP payment method that is private by default.
+
+## The latency answer: sessions
+
+"But Zcash has 75-second block times."
+
+Sessions solve this. The on-chain wait happens once at deposit. Every subsequent request is instant.
+
+```
+Agent  →  deposit 100,000 zat          (one on-chain tx, ~75s)
+Agent  →  open session                 (bearer token issued)
+Agent  →  request → response           (0ms — no chain interaction)
+Agent  →  request → response           (0ms — no chain interaction)
+Agent  →  request → response           (0ms — no chain interaction)
+           ... hundreds of requests ...
+Agent  →  close session                (refund unused balance)
+```
+
+Pay once, call instantly, get back the change. Per-request latency is zero.
 
 ## How it works
 
-### Charge
-
-Single shielded payment per request. Standard HTTP 402 flow.
+### Session (recommended)
 
 ```
-Agent  ->  GET /api/fortune
-Server ->  402 + challenge (amount, recipient, memo)
-Agent  ->  shielded ZEC with memo "zimppy:{challenge_id}"
-Agent  ->  GET /api/fortune + Authorization: Payment {txid}
-Server ->  decrypt with Orchard IVK, verify amount + memo
-Server ->  200 OK + Payment-Receipt
-```
-
-### Session
-
-Deposit once on-chain, then instant bearer requests with no chain interaction.
-
-```
-Agent  ->  deposit 100,000 zat           (on-chain)
-Agent  ->  open session                  (bearer token)
-Agent  ->  request, request, request     (instant)
-Agent  ->  close session                 (refund unused balance)
+Agent  →  deposit 100,000 zat           (on-chain, ~75s one-time)
+Agent  →  open session                  (bearer token issued)
+Agent  →  GET /api/query + bearer       (instant, balance deducted)
+Agent  →  GET /api/query + bearer       (instant, balance deducted)
+Agent  →  close session                 (refund unused balance on-chain)
 ```
 
 ### Streaming
 
-Pay-per-token over SSE. Server deducts from session balance per word streamed.
+Pay per token over SSE. Server deducts from session balance per word streamed.
 
 ```
-Agent  ->  open session with deposit
-Agent  ->  GET /api/stream (SSE)
-Server ->  stream word by word, deducting per token
-Agent  ->  close session, refund remaining
+Agent  →  open session with deposit
+Agent  →  GET /api/stream (SSE)
+Server →  stream word by word, deducting per token
+Agent  →  close session, refund remaining
+```
+
+### Charge
+
+Single shielded payment per request. Use when the request is infrequent or high-value enough that a one-time ~75s confirmation is acceptable.
+
+```
+Agent  →  GET /api/resource
+Server →  402 + challenge (amount, recipient, memo)
+Agent  →  shielded ZEC with memo "zimppy:{challenge_id}"
+Agent  →  GET /api/resource + Authorization: Payment {txid}
+Server →  decrypt with Orchard IVK, verify amount + memo
+Server →  200 OK + Payment-Receipt
 ```
 
 ## Server
@@ -123,7 +136,7 @@ import { zcash } from 'zimppy-ts/client'
 
 const mppx = Mppx.create({ methods: [zcash({ wallet: 'default' })] })
 
-// 402 -> pay -> retry handled automatically
+// Session opened automatically, 402 handled transparently
 const res = await mppx.fetch('https://api.example.com/resource')
 ```
 
@@ -149,6 +162,15 @@ npx zimppy request <url>              # auto 402 -> pay -> retry
 npx zimppy wallet send <addr> 42000   # shielded transfer
 npx zimppy wallet use work            # switch wallet identity
 ```
+
+## What's included
+
+- **Sessions** — deposit once, instant bearer requests, refund on close
+- **Streaming** — pay-per-token metered content over SSE
+- **Charge** — single shielded payment per request (HTTP 402)
+- **CLI** — `npx zimppy request` with automatic payment handling
+- **Dual SDK** — TypeScript and Rust
+- **Spec-compliant** — HMAC-SHA256 challenges, RFC 9457 errors, `/.well-known/payment` discovery
 
 ## Architecture
 
