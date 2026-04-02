@@ -149,12 +149,13 @@ impl ZimppyWalletNapi {
         data_dir: String,
         lwd_endpoint: String,
         network: String,
+        passphrase: Option<String>,
     ) -> napi::Result<Self> {
         trace_napi(
             "open",
             format!("data_dir={} lwd_endpoint={} network={}", data_dir, lwd_endpoint, network),
         );
-        Self::open_inner(data_dir, lwd_endpoint, network, None, None, false).await
+        Self::open_inner(data_dir, lwd_endpoint, network, None, None, false, passphrase).await
     }
 
     /// Create a fresh wallet and persist it immediately.
@@ -164,8 +165,9 @@ impl ZimppyWalletNapi {
         lwd_endpoint: String,
         network: String,
         birthday_height: Option<u32>,
+        passphrase: Option<String>,
     ) -> napi::Result<Self> {
-        Self::open_inner(data_dir, lwd_endpoint, network, None, birthday_height, true).await
+        Self::open_inner(data_dir, lwd_endpoint, network, None, birthday_height, true, passphrase).await
     }
 
     /// Restore a wallet from a seed phrase and persist it immediately.
@@ -176,6 +178,7 @@ impl ZimppyWalletNapi {
         network: String,
         seed_phrase: String,
         birthday_height: u32,
+        passphrase: Option<String>,
     ) -> napi::Result<Self> {
         Self::open_inner(
             data_dir,
@@ -184,6 +187,7 @@ impl ZimppyWalletNapi {
             Some(seed_phrase),
             Some(birthday_height),
             true,
+            passphrase,
         )
         .await
     }
@@ -195,6 +199,7 @@ impl ZimppyWalletNapi {
         seed_phrase: Option<String>,
         birthday_height: Option<u32>,
         create: bool,
+        passphrase: Option<String>,
     ) -> napi::Result<Self> {
         let network_type = match network.as_str() {
             "mainnet" => zcash_protocol::consensus::NetworkType::Main,
@@ -209,7 +214,7 @@ impl ZimppyWalletNapi {
             birthday_height,
             account_index: 0,
             num_accounts: 1,
-            passphrase: None,
+            passphrase,
         };
 
         let wallet = if create {
