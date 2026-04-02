@@ -123,6 +123,9 @@ async fn main() -> Result<(), WalletError> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
 
+    // --passphrase <phrase> enables encrypted wallet at rest
+    let passphrase: Option<String> = flag_value(&args, "--passphrase").map(|s| s.to_string());
+
     match cmd {
         "init" => {
             let phrase = pos.get(1).ok_or(WalletError::InvalidSeed(
@@ -142,6 +145,7 @@ async fn main() -> Result<(), WalletError> {
                 birthday_height: birthday,
                 account_index: 0,
                 num_accounts,
+                passphrase: passphrase.clone(),
             })
             .await?;
             sp.finish_and_clear();
@@ -156,7 +160,7 @@ async fn main() -> Result<(), WalletError> {
         }
 
         "sync" => {
-            let mut wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network, account_index, passphrase.clone()).await?;
             if let Some(mc) = min_confirmations {
                 wallet.set_min_confirmations(mc).await;
             }
@@ -172,13 +176,13 @@ async fn main() -> Result<(), WalletError> {
         }
 
         "address" => {
-            let wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
+            let wallet = open_existing(&data_dir, &lwd, network, account_index, passphrase.clone()).await?;
             let addr = wallet.address().await?;
             println!("{addr}");
         }
 
         "balance" => {
-            let mut wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network, account_index, passphrase.clone()).await?;
             let sp = spinner("Syncing...");
             wallet.sync().await?;
             sp.finish_and_clear();
@@ -197,7 +201,7 @@ async fn main() -> Result<(), WalletError> {
                 .ok_or(WalletError::Send("invalid amount".to_string()))?;
             let memo = pos.get(3).copied();
 
-            let mut wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network, account_index, passphrase.clone()).await?;
             if let Some(mc) = min_confirmations {
                 wallet.set_min_confirmations(mc).await;
             }
@@ -282,7 +286,7 @@ async fn main() -> Result<(), WalletError> {
             let subcmd = pos.get(1).copied().unwrap_or("list");
             match subcmd {
                 "list" => {
-                    let wallet = open_existing(&data_dir, &lwd, network, 0).await?;
+                    let wallet = open_existing(&data_dir, &lwd, network, 0, passphrase.clone()).await?;
                     let accounts = wallet.accounts_list().await?;
                     eprintln!("{}", style("Accounts").bold());
                     for (idx, addr) in &accounts {
@@ -390,6 +394,7 @@ async fn open_existing(
     lwd: &str,
     network: NetworkType,
     account_index: u32,
+    passphrase: Option<String>,
 ) -> Result<ZimppyWallet, WalletError> {
     ZimppyWallet::open(WalletConfig {
         data_dir: data_dir.clone(),
@@ -399,6 +404,7 @@ async fn open_existing(
         birthday_height: None,
         account_index,
         num_accounts: 1,
+        passphrase,
     })
     .await
 }

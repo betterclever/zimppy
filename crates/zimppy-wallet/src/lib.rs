@@ -1,8 +1,9 @@
 mod config;
+mod encryption;
 mod error;
 
 use std::fs::{self, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Cursor, Read, Write};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -44,6 +45,7 @@ pub struct ZimppyWallet {
     client: LightClient,
     save_task_running: bool,
     account_index: u32,
+    passphrase: Option<String>,
 }
 
 impl ZimppyWallet {
@@ -159,6 +161,7 @@ impl ZimppyWallet {
             client,
             save_task_running: false,
             account_index: wallet_config.account_index,
+            passphrase: wallet_config.passphrase.clone(),
         };
         wallet.save().await?;
         trace_wallet(
@@ -171,17 +174,37 @@ impl ZimppyWallet {
     fn open_existing(wallet_config: WalletConfig) -> Result<Self, WalletError> {
         config::ensure_tls();
         let account_index = wallet_config.account_index;
+        let passphrase = wallet_config.passphrase.clone();
         let zingo_config = config::to_zingo_config(&wallet_config)?;
-        trace_wallet(
-            "open_existing",
-            format!("wallet_path={}", zingo_config.get_wallet_path().display()),
-        );
-        let client = LightClient::create_from_wallet_path(zingo_config)
+        let path = zingo_config.get_wallet_path();
+        trace_wallet("open_existing", format!("wallet_path={}", path.display()));
+
+        let mut raw = Vec::new();
+        fs::File::open(&path)?.read_to_end(&mut raw)?;
+
+        let plaintext = if encryption::is_encrypted(&raw) {
+            let pp = passphrase.as_deref().ok_or_else(|| {
+                WalletError::Crypto(
+                    "wallet is encrypted — provide a passphrase to open it".to_string(),
+                )
+            })?;
+            encryption::decrypt(pp, &raw)?
+        } else {
+            raw
+        };
+
+        let wallet = LightWallet::read(Cursor::new(plaintext), zingo_config.chain)
+            .map_err(|e| WalletError::Client(format!("wallet read failed: {e}")))?;
+
+        // overwrite=true skips the file-exists check; no write occurs here
+        let client = LightClient::create_from_wallet(wallet, zingo_config, true)
             .map_err(|e| WalletError::Client(format!("{e}")))?;
+
         Ok(Self {
             client,
             save_task_running: false,
             account_index,
+            passphrase,
         })
     }
 
@@ -351,11 +374,15 @@ impl ZimppyWallet {
             .rescan_and_await()
             .await
             .map_err(|e| WalletError::Sync(format!("rescan failed: {e}")))?;
-        // No manual save — background save_task handles persistence
+        if self.passphrase.is_some() {
+            self.client.wallet.write().await.save_required = true;
+            self.save().await?;
+        }
         Ok(())
     }
 
     /// Save wallet state to disk.
+    /// If a passphrase is set, the wallet bytes are encrypted before writing.
     pub async fn save(&self) -> Result<(), WalletError> {
         let wallet_path = self.client.config().get_wallet_path();
         trace_wallet("save:begin", format!("wallet_path={}", wallet_path.display()));
@@ -366,7 +393,17 @@ impl ZimppyWallet {
             .await
             .save()
             .map_err(|e| WalletError::Io(e))?;
-        if let Some(data) = bytes {
+        if let Some(plaintext) = bytes {
+            let data = match self.passphrase.as_deref() {
+                Some(pp) => {
+                    trace_wallet(
+                        "save:encrypt",
+                        format!("wallet_path={} plaintext_bytes={}", wallet_path.display(), plaintext.len()),
+                    );
+                    encryption::encrypt(pp, &plaintext)?
+                }
+                None => plaintext,
+            };
             trace_wallet(
                 "save:write",
                 format!("wallet_path={} bytes={}", wallet_path.display(), data.len()),
@@ -515,12 +552,23 @@ impl ZimppyWallet {
             "ensure_ready:end",
             format!("wallet_path={}", self.client.config().get_wallet_path().display()),
         );
-        // No manual save — let the background save_task handle persistence
-        // (matches zingo-cli behavior: never manually serialize wallet state)
+        // For encrypted wallets, save_task is disabled — persist checkpoints explicitly.
+        // For plaintext wallets, the background save_task handles persistence.
+        if self.passphrase.is_some() {
+            // Force save_required so save() actually writes.
+            self.client.wallet.write().await.save_required = true;
+            self.save().await?;
+        }
         Ok(())
     }
 
     async fn ensure_save_task(&mut self) {
+        // For encrypted wallets, never start zingolib's background save_task — it writes
+        // raw plaintext bytes directly to disk, bypassing our encryption layer.
+        // All persistence goes through ZimppyWallet::save() instead.
+        if self.passphrase.is_some() {
+            return;
+        }
         if !self.save_task_running {
             trace_wallet(
                 "save_task:start",
@@ -600,7 +648,81 @@ mod tests {
             birthday_height,
             account_index: 0,
             num_accounts: 1,
+            passphrase: None,
         }
+    }
+
+    fn test_config_encrypted(
+        data_dir: PathBuf,
+        seed_phrase: Option<String>,
+        birthday_height: Option<u32>,
+        passphrase: &str,
+    ) -> WalletConfig {
+        WalletConfig {
+            data_dir,
+            lwd_endpoint: "https://testnet.zec.rocks".to_string(),
+            network: NetworkType::Test,
+            seed_phrase,
+            birthday_height,
+            account_index: 0,
+            num_accounts: 1,
+            passphrase: Some(passphrase.to_string()),
+        }
+    }
+
+    #[test]
+    fn encryption_round_trip() {
+        use crate::encryption;
+        let plaintext = b"hello zcash wallet bytes";
+        let encrypted = encryption::encrypt("hunter2", plaintext).expect("encrypt");
+        assert!(encryption::is_encrypted(&encrypted));
+        let decrypted = encryption::decrypt("hunter2", &encrypted).expect("decrypt");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn encryption_wrong_passphrase_fails() {
+        use crate::encryption;
+        let encrypted = encryption::encrypt("correct", b"secret").expect("encrypt");
+        assert!(encryption::decrypt("wrong", &encrypted).is_err());
+    }
+
+    #[tokio::test]
+    async fn encrypted_wallet_persists_and_reopens() {
+        let data_dir = test_wallet_dir("enc-persist");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let wallet = ZimppyWallet::create(test_config_encrypted(
+            data_dir.clone(),
+            Some(seed.clone()),
+            Some(3_000_000),
+            "mypassphrase",
+        ))
+        .await
+        .expect("wallet should be created");
+        let original_address = wallet.address().await.expect("address");
+
+        // Verify the file on disk is actually encrypted
+        let raw = std::fs::read(wallet_path(&data_dir)).expect("wallet file");
+        assert!(crate::encryption::is_encrypted(&raw), "file should be encrypted");
+
+        // Opening without passphrase must fail
+        let no_pass_err = ZimppyWallet::open(test_config(data_dir.clone(), None, None)).await;
+        assert!(matches!(no_pass_err, Err(WalletError::Crypto(_))));
+
+        // Opening with correct passphrase must succeed and return same address
+        let reopened = ZimppyWallet::open(test_config_encrypted(
+            data_dir.clone(),
+            None,
+            None,
+            "mypassphrase",
+        ))
+        .await
+        .expect("wallet should reopen");
+        let reopened_address = reopened.address().await.expect("address");
+        assert_eq!(original_address, reopened_address);
+
+        let _ = fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]

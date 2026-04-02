@@ -15,4 +15,6 @@ pub enum WalletError {
     Address(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("crypto error: {0}")]
+    Crypto(String),
 }

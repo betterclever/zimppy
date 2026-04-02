@@ -209,6 +209,7 @@ impl ZimppyWalletNapi {
             birthday_height,
             account_index: 0,
             num_accounts: 1,
+            passphrase: None,
         };
 
         let wallet = if create {

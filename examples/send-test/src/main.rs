@@ -36,6 +36,9 @@ async fn main() {
                 network: NetworkType::Test,
                 seed_phrase: Some(SEED.to_string()),
                 birthday_height: Some(BIRTHDAY),
+                account_index: 0,
+                num_accounts: 1,
+                passphrase: None,
             };
             eprintln!("Restoring wallet from seed...");
             let mut wallet = ZimppyWallet::open(config).await.expect("restore");
@@ -53,6 +56,9 @@ async fn main() {
                 network: NetworkType::Test,
                 seed_phrase: None,
                 birthday_height: None,
+                account_index: 0,
+                num_accounts: 1,
+                passphrase: None,
             };
             let mut wallet = ZimppyWallet::open(config).await.expect("open");
             eprintln!("Syncing...");
@@ -72,6 +78,9 @@ async fn main() {
                 network: NetworkType::Test,
                 seed_phrase: None,
                 birthday_height: None,
+                account_index: 0,
+                num_accounts: 1,
+                passphrase: None,
             };
 
             // Open existing wallet
@@ -129,6 +138,9 @@ async fn main() {
                 network: NetworkType::Test,
                 seed_phrase: None,
                 birthday_height: None,
+                account_index: 0,
+                num_accounts: 1,
+                passphrase: None,
             };
 
             eprintln!("Opening wallet...");
