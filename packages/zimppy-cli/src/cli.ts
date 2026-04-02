@@ -44,7 +44,7 @@ async function openWallet(cfg: ZimppyConfig, seedPhrase?: string): Promise<Zimpp
   if (seedPhrase) {
     throw new Error('openWallet only opens existing wallets; use Wallet.restore for seed restores')
   }
-  return Wallet.open(cfg.dataDir, cfg.lwdServer, cfg.network)
+  return Wallet.open(cfg.dataDir, cfg.lwdServer, cfg.network, process.env.ZIMPPY_PASSPHRASE ?? null)
 }
 
 function walletDir(name: string): string {
@@ -155,7 +155,7 @@ async function walletCreate(args?: string[]): Promise<void> {
   console.error(`Creating wallet '${name}'...`)
   try {
     const { ZimppyWalletNapi: Wallet } = require('@zimppy/core-napi') as typeof import('@zimppy/core-napi')
-    const wallet = await Wallet.create(config.dataDir, config.lwdServer, config.network, null)
+    const wallet = await Wallet.create(config.dataDir, config.lwdServer, config.network, null, process.env.ZIMPPY_PASSPHRASE ?? null)
     const addr = await wallet.address()
     const seed = await wallet.seedPhrase()
     console.error('')
@@ -204,7 +204,7 @@ async function walletRestore(args: string[]): Promise<void> {
   console.error(`Restoring wallet '${name}' from seed phrase...`)
   try {
     const { ZimppyWalletNapi: Wallet } = require('@zimppy/core-napi') as typeof import('@zimppy/core-napi')
-    const wallet = await Wallet.restore(config.dataDir, config.lwdServer, config.network, phrase, birthday)
+    const wallet = await Wallet.restore(config.dataDir, config.lwdServer, config.network, phrase, birthday, process.env.ZIMPPY_PASSPHRASE ?? null)
     const addr = await wallet.address()
     console.error(`Address: ${addr}`)
   } catch (e) {

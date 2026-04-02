@@ -68,6 +68,7 @@ export async function resolveWallet(name?: string): Promise<ResolvedWallet> {
     dataDir,
     config.lwdServer,
     config.network,
+    process.env.ZIMPPY_PASSPHRASE ?? null,
   )
 
   const [address, orchardIvk, walletNetwork] = await Promise.all([
@@ -112,6 +113,7 @@ export async function openWallet(name?: string) {
     dataDir,
     config.lwdServer,
     config.network,
+    process.env.ZIMPPY_PASSPHRASE ?? null,
   )
 
   return { wallet, config, walletName }
