@@ -646,6 +646,8 @@ async fn send_refund(
         network: cfg.network,
         seed_phrase: cfg.seed_phrase.clone(),
         birthday_height: cfg.birthday_height,
+        account_index: cfg.account_index,
+        num_accounts: cfg.num_accounts,
     })
     .await?;
     wallet.sync().await?;

@@ -207,6 +207,8 @@ impl ZimppyWalletNapi {
             network: network_type,
             seed_phrase,
             birthday_height,
+            account_index: 0,
+            num_accounts: 1,
         };
 
         let wallet = if create {

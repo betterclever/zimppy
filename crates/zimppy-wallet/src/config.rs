@@ -19,6 +19,10 @@ pub struct WalletConfig {
     pub seed_phrase: Option<String>,
     /// Birthday height (block to start scanning from)
     pub birthday_height: Option<u32>,
+    /// Account index to use (0-based, default 0)
+    pub account_index: u32,
+    /// Number of accounts to derive from seed during init (default 1)
+    pub num_accounts: u32,
 }
 
 static TLS_INIT: Once = Once::new();

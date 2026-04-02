@@ -38,6 +38,34 @@ fn print_balance(bal: &zimppy_wallet::WalletBalance) {
     eprintln!("  Total:     {}", format_zat(bal.total_zat));
 }
 
+// ── Arg helpers ──────────────────────────────────────────────────
+
+/// Return the value of `--flag <value>` from args, if present.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+}
+
+/// Return positional arguments (those not starting with `--` and not values of flags).
+fn positional_args(args: &[String]) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut skip_next = false;
+    for arg in args.iter().skip(1) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg.starts_with("--") {
+            skip_next = true; // next arg is the flag value
+            continue;
+        }
+        result.push(arg.as_str());
+    }
+    result
+}
+
 // ── Main ─────────────────────────────────────────────────────────
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
@@ -47,7 +75,8 @@ const BLOCK_TIME_SECS: u64 = 90;
 async fn main() -> Result<(), WalletError> {
     let args: Vec<String> = std::env::args().collect();
     let debug = args.contains(&"--debug".to_string());
-    let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+    let pos = positional_args(&args);
+    let cmd = pos.first().copied().unwrap_or("help");
 
     let data_dir = std::env::var("ZIMPPY_WALLET_DIR")
         .map(PathBuf::from)
@@ -75,8 +104,10 @@ async fn main() -> Result<(), WalletError> {
             .init();
     }
 
-    let lwd = std::env::var("ZIMPPY_LWD_ENDPOINT")
-        .unwrap_or_else(|_| "https://testnet.zec.rocks".to_string());
+    // --rpc overrides ZIMPPY_LWD_ENDPOINT
+    let lwd = flag_value(&args, "--rpc")
+        .or_else(|| std::env::var("ZIMPPY_LWD_ENDPOINT").ok())
+        .unwrap_or_else(|| "https://testnet.zec.rocks".to_string());
 
     let network = match std::env::var("ZIMPPY_NETWORK").as_deref() {
         Ok("mainnet") => NetworkType::Main,
@@ -87,32 +118,45 @@ async fn main() -> Result<(), WalletError> {
         .ok()
         .and_then(|s| s.parse().ok());
 
+    // --account <n> selects the account index (default 0)
+    let account_index: u32 = flag_value(&args, "--account")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
     match cmd {
         "init" => {
-            let phrase = args.get(2).ok_or(WalletError::InvalidSeed(
-                "usage: zimppy-wallet init \"seed phrase words...\"".to_string(),
+            let phrase = pos.get(1).ok_or(WalletError::InvalidSeed(
+                "usage: zimppy-wallet init \"seed phrase words...\" <birthday> [--accounts N] [--rpc URL]".to_string(),
             ))?;
-            let birthday: Option<u32> = args.get(3).and_then(|s| s.parse().ok());
+            let birthday: Option<u32> = pos.get(2).and_then(|s| s.parse().ok());
+            let num_accounts: u32 = flag_value(&args, "--accounts")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
 
             let sp = spinner("Creating wallet...");
             let wallet = ZimppyWallet::create(WalletConfig {
                 data_dir: data_dir.clone(),
                 lwd_endpoint: lwd,
                 network,
-                seed_phrase: Some(phrase.clone()),
+                seed_phrase: Some(phrase.to_string()),
                 birthday_height: birthday,
+                account_index: 0,
+                num_accounts,
             })
             .await?;
             sp.finish_and_clear();
 
             let addr = wallet.address().await?;
             eprintln!("{} Wallet created at {}", style("✓").green().bold(), data_dir.display());
+            if num_accounts > 1 {
+                eprintln!("  Accounts: {}", num_accounts);
+            }
             eprintln!("  Address: {}", style(&addr).cyan());
             println!("{addr}");
         }
 
         "sync" => {
-            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
             if let Some(mc) = min_confirmations {
                 wallet.set_min_confirmations(mc).await;
             }
@@ -128,13 +172,13 @@ async fn main() -> Result<(), WalletError> {
         }
 
         "address" => {
-            let wallet = open_existing(&data_dir, &lwd, network).await?;
+            let wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
             let addr = wallet.address().await?;
             println!("{addr}");
         }
 
         "balance" => {
-            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
             let sp = spinner("Syncing...");
             wallet.sync().await?;
             sp.finish_and_clear();
@@ -144,16 +188,16 @@ async fn main() -> Result<(), WalletError> {
         }
 
         "send" => {
-            let to = args.get(2).ok_or(WalletError::Send(
+            let to = pos.get(1).ok_or(WalletError::Send(
                 "usage: zimppy-wallet send <address> <amount_zat> [memo]".to_string(),
             ))?;
-            let amount: u64 = args
-                .get(3)
+            let amount: u64 = pos
+                .get(2)
                 .and_then(|s| s.parse().ok())
                 .ok_or(WalletError::Send("invalid amount".to_string()))?;
-            let memo = args.get(4).map(|s| s.as_str());
+            let memo = pos.get(3).copied();
 
-            let mut wallet = open_existing(&data_dir, &lwd, network).await?;
+            let mut wallet = open_existing(&data_dir, &lwd, network, account_index).await?;
             if let Some(mc) = min_confirmations {
                 wallet.set_min_confirmations(mc).await;
             }
@@ -183,7 +227,6 @@ async fn main() -> Result<(), WalletError> {
 
             for attempt in 0..=max_attempts {
                 if attempt > 0 {
-                    // Wait POLL_INTERVAL but update elapsed every second
                     for _ in 0..POLL_INTERVAL.as_secs() {
                         let elapsed = started.elapsed().as_secs();
                         sp.set_message(format!(
@@ -221,7 +264,6 @@ async fn main() -> Result<(), WalletError> {
             })?;
             eprintln!("{} Broadcast: {}", style("✓").green().bold(), style(&txid).dim());
 
-            // Wait for maturity
             let sp = spinner("Waiting for confirmation...");
             wait_for_maturity(&mut wallet, amount + 10_000, min_conf, &sp).await?;
             sp.finish_and_clear();
@@ -236,18 +278,47 @@ async fn main() -> Result<(), WalletError> {
             println!("{txid}");
         }
 
+        "accounts" => {
+            let subcmd = pos.get(1).copied().unwrap_or("list");
+            match subcmd {
+                "list" => {
+                    let wallet = open_existing(&data_dir, &lwd, network, 0).await?;
+                    let accounts = wallet.accounts_list().await?;
+                    eprintln!("{}", style("Accounts").bold());
+                    for (idx, addr) in &accounts {
+                        let marker = if *idx == account_index { style("*").green().bold().to_string() } else { " ".to_string() };
+                        eprintln!("  {marker} [{}] {}", idx, style(addr).cyan());
+                    }
+                    eprintln!();
+                    eprintln!("  Use --account <n> to select an account.");
+                }
+                _ => {
+                    eprintln!("{}", style("zimppy-wallet accounts").bold());
+                    eprintln!();
+                    eprintln!("{}:", style("Subcommands").underlined());
+                    eprintln!("  {}   List all accounts in this wallet", style("list").green());
+                    eprintln!();
+                    eprintln!("  To create a wallet with multiple accounts:");
+                    eprintln!("    zimppy-wallet init \"<seed>\" <birthday> --accounts <n>");
+                }
+            }
+        }
+
         _ => {
             eprintln!("{}", style("zimppy-wallet").bold());
             eprintln!("Native Zcash wallet CLI");
             eprintln!();
             eprintln!("{}:", style("Commands").underlined());
-            eprintln!("  {} <seed> [birthday]   Create/restore wallet", style("init").green());
-            eprintln!("  {}                      Sync with blockchain", style("sync").green());
-            eprintln!("  {}                   Show unified address", style("address").green());
-            eprintln!("  {}                   Show balance", style("balance").green());
-            eprintln!("  {} <addr> <zat> [memo]  Send ZEC", style("send").green());
+            eprintln!("  {} <seed> <birthday> [--accounts N]  Create/restore wallet", style("init").green());
+            eprintln!("  {}                                    Sync with blockchain", style("sync").green());
+            eprintln!("  {}                                 Show unified address", style("address").green());
+            eprintln!("  {}                                 Show balance", style("balance").green());
+            eprintln!("  {} <addr> <zat> [memo]               Send ZEC", style("send").green());
+            eprintln!("  {} list                              List all accounts", style("accounts").green());
             eprintln!();
             eprintln!("{}:", style("Flags").underlined());
+            eprintln!("  {} <url>          Lightwalletd endpoint (overrides env)", style("--rpc").yellow());
+            eprintln!("  {} <n>        Account index to use (default: 0)", style("--account").yellow());
             eprintln!("  {}                 Show debug logs on stderr", style("--debug").yellow());
             eprintln!();
             eprintln!("{}:", style("Environment").underlined());
@@ -276,11 +347,10 @@ async fn wait_for_maturity(
     let mut stale_count = 0u32;
     let stale_limit = std::cmp::max(min_conf * 8, 24);
     let started = std::time::Instant::now();
-    let est_secs = min_conf as u64 * 75; // estimated time for min_conf blocks
+    let est_secs = min_conf as u64 * 75;
 
     let mut last_bal: Option<zimppy_wallet::WalletBalance> = None;
     for _attempt in 1..=max_polls {
-        // Wait POLL_INTERVAL but update elapsed every second
         for _ in 0..POLL_INTERVAL.as_secs() {
             let elapsed = started.elapsed().as_secs();
             let remaining = est_secs.saturating_sub(elapsed);
@@ -319,6 +389,7 @@ async fn open_existing(
     data_dir: &PathBuf,
     lwd: &str,
     network: NetworkType,
+    account_index: u32,
 ) -> Result<ZimppyWallet, WalletError> {
     ZimppyWallet::open(WalletConfig {
         data_dir: data_dir.clone(),
@@ -326,6 +397,8 @@ async fn open_existing(
         network,
         seed_phrase: None,
         birthday_height: None,
+        account_index,
+        num_accounts: 1,
     })
     .await
 }

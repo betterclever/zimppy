@@ -43,6 +43,13 @@ pub struct SyncStatus {
 pub struct ZimppyWallet {
     client: LightClient,
     save_task_running: bool,
+    account_index: u32,
+}
+
+impl ZimppyWallet {
+    fn account_id(&self) -> zip32::AccountId {
+        zip32::AccountId::try_from(self.account_index).unwrap_or(zip32::AccountId::ZERO)
+    }
 }
 
 fn trace_id() -> String {
@@ -119,7 +126,8 @@ impl ZimppyWallet {
                     .map_err(|e| WalletError::InvalidSeed(format!("{e}")))?;
                 let wallet_base = WalletBase::Mnemonic {
                     mnemonic,
-                    no_of_accounts: NonZeroU32::new(1).expect("nonzero"),
+                    no_of_accounts: NonZeroU32::new(wallet_config.num_accounts.max(1))
+                        .expect("nonzero"),
                 };
                 LightWallet::new(
                     zingo_config.chain,
@@ -150,6 +158,7 @@ impl ZimppyWallet {
         let wallet = Self {
             client,
             save_task_running: false,
+            account_index: wallet_config.account_index,
         };
         wallet.save().await?;
         trace_wallet(
@@ -161,6 +170,7 @@ impl ZimppyWallet {
 
     fn open_existing(wallet_config: WalletConfig) -> Result<Self, WalletError> {
         config::ensure_tls();
+        let account_index = wallet_config.account_index;
         let zingo_config = config::to_zingo_config(&wallet_config)?;
         trace_wallet(
             "open_existing",
@@ -171,6 +181,7 @@ impl ZimppyWallet {
         Ok(Self {
             client,
             save_task_running: false,
+            account_index,
         })
     }
 
@@ -220,7 +231,7 @@ impl ZimppyWallet {
 
         let (_id, ua) = self
             .client
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .generate_unified_address(ReceiverSelection::all_shielded(), self.account_id())
             .await
             .map_err(|e| WalletError::Address(format!("failed to generate address: {e:?}")))?;
 
@@ -233,7 +244,7 @@ impl ZimppyWallet {
     pub async fn balance(&self) -> Result<WalletBalance, WalletError> {
         let bal = self
             .client
-            .account_balance(zip32::AccountId::ZERO)
+            .account_balance(self.account_id())
             .await
             .map_err(|e| WalletError::Client(format!("{e}")))?;
 
@@ -318,7 +329,7 @@ impl ZimppyWallet {
 
         let txids = self
             .client
-            .quick_send(request, zip32::AccountId::ZERO, true)
+            .quick_send(request, self.account_id(), true)
             .await
             .map_err(|e| WalletError::Send(format!("{e}")))?;
 
@@ -380,7 +391,7 @@ impl ZimppyWallet {
         use zip32::Scope;
 
         let wallet = self.client.wallet.read().await;
-        let account_id = zip32::AccountId::ZERO;
+        let account_id = self.account_id();
         let key_store = wallet
             .unified_key_store
             .get(&account_id)
@@ -395,6 +406,29 @@ impl ZimppyWallet {
 
         let ivk = orchard_fvk.to_ivk(Scope::External);
         Ok(hex::encode(ivk.to_bytes()))
+    }
+
+    /// Return the active account index.
+    pub fn account_index(&self) -> u32 {
+        self.account_index
+    }
+
+    /// List (account_index, unified_address) for all accounts in this wallet.
+    pub async fn accounts_list(&self) -> Result<Vec<(u32, String)>, WalletError> {
+        let addrs = self.client.unified_addresses_json().await;
+        let result: Vec<(u32, String)> = addrs
+            .members()
+            .enumerate()
+            .filter_map(|(i, entry)| {
+                entry["encoded_address"]
+                    .as_str()
+                    .map(|a| (i as u32, a.to_string()))
+            })
+            .collect();
+        if result.is_empty() {
+            return Err(WalletError::Address("no accounts found".to_string()));
+        }
+        Ok(result)
     }
 
     /// Set the minimum confirmations required before notes are spendable.
@@ -564,6 +598,8 @@ mod tests {
             network: NetworkType::Test,
             seed_phrase,
             birthday_height,
+            account_index: 0,
+            num_accounts: 1,
         }
     }
 
