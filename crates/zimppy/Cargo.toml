@@ -1,6 +1,6 @@
 [package]
 name = "zimppy"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Private machine payments on Zcash — the Zcash payment method for MPP"
 license = "MIT"
