@@ -5,11 +5,19 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const binaryNames = [
-  'index.linux-x64-gnu.node',
-  'zimppy-core.darwin-arm64.node',
-  'index.darwin-arm64.node',
-]
+const binaryNamesByTarget = {
+  'darwin-arm64': [
+    'zimppy-core.darwin-arm64.node',
+    'index.darwin-arm64.node',
+  ],
+  'linux-x64': [
+    'zimppy-core.linux-x64-gnu.node',
+    'index.linux-x64-gnu.node',
+  ],
+}
+
+const target = `${process.platform}-${process.arch}`
+const binaryNames = binaryNamesByTarget[target] ?? []
 
 let nativeModule = null
 for (const binaryName of binaryNames) {
@@ -22,7 +30,8 @@ for (const binaryName of binaryNames) {
 }
 
 if (!nativeModule) {
-  throw new Error(`Failed to load native module. Tried: ${binaryNames.join(', ')}`)
+  const tried = binaryNames.length > 0 ? binaryNames.join(', ') : '(no supported binaries for this platform)'
+  throw new Error(`Failed to load native module for ${target}. Tried: ${tried}`)
 }
 
 const { ZimppyCore, ZimppyWalletNapi } = nativeModule
