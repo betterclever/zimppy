@@ -28,7 +28,7 @@ const { zcashClient, zcashSessionClient, isEventStream, parseEvent } = require('
 
 import { ui } from './ui.js'
 
-const VERSION = '0.1.0'
+const VERSION = '0.4.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
 const WALLETS_DIR = join(CONFIG_DIR, 'wallets')
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')

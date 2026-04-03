@@ -1,6 +1,6 @@
 {
   "name": "zimppy-ts",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "description": "TypeScript SDK for Zimppy \u2014 private machine payments on Zcash",
   "type": "module",
