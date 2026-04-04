@@ -26,12 +26,16 @@ pub use error::WalletError;
 /// Wallet balance information.
 #[derive(Debug, Clone)]
 pub struct WalletBalance {
-    /// Total spendable balance in zatoshis
+    /// Spendable shielded (Orchard) balance in zatoshis
     pub spendable_zat: u64,
-    /// Balance pending confirmations
+    /// Shielded balance pending confirmations
     pub pending_zat: u64,
-    /// Total balance (spendable + pending)
+    /// Total shielded balance (spendable + pending)
     pub total_zat: u64,
+    /// Confirmed transparent balance in zatoshis
+    pub transparent_zat: u64,
+    /// Unconfirmed transparent balance in zatoshis
+    pub transparent_pending_zat: u64,
 }
 
 /// Sync status after a sync operation.
@@ -273,11 +277,15 @@ impl ZimppyWallet {
 
         let spendable = bal.confirmed_orchard_balance.map(u64::from).unwrap_or(0);
         let pending = bal.unconfirmed_orchard_balance.map(u64::from).unwrap_or(0);
+        let transparent = bal.confirmed_transparent_balance.map(u64::from).unwrap_or(0);
+        let transparent_pending = bal.unconfirmed_transparent_balance.map(u64::from).unwrap_or(0);
 
         Ok(WalletBalance {
             spendable_zat: spendable,
             pending_zat: pending,
             total_zat: spendable + pending,
+            transparent_zat: transparent,
+            transparent_pending_zat: transparent_pending,
         })
     }
 
@@ -620,7 +628,7 @@ fn write_wallet_bytes(wallet_path: &Path, bytes: &[u8]) -> Result<(), WalletErro
 
 #[cfg(test)]
 mod tests {
-    use super::{wallet_path, WalletConfig, WalletError, ZimppyWallet};
+    use super::{wallet_path, WalletBalance, WalletConfig, WalletError, ZimppyWallet};
     use bip0039::{English, Mnemonic};
     use std::fs;
     use std::path::PathBuf;
@@ -772,5 +780,18 @@ mod tests {
         assert_eq!(first, second);
 
         let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn wallet_balance_has_transparent_fields() {
+        let bal = WalletBalance {
+            spendable_zat: 100,
+            pending_zat: 0,
+            total_zat: 100,
+            transparent_zat: 50,
+            transparent_pending_zat: 0,
+        };
+        assert_eq!(bal.transparent_zat, 50);
+        assert_eq!(bal.transparent_pending_zat, 0);
     }
 }
