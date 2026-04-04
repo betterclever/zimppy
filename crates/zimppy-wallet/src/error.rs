@@ -11,6 +11,8 @@ pub enum WalletError {
     Sync(String),
     #[error("send error: {0}")]
     Send(String),
+    #[error("shield error: {0}")]
+    Shield(String),
     #[error("address error: {0}")]
     Address(String),
     #[error("io error: {0}")]
