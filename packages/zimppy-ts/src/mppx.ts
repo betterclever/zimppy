@@ -141,7 +141,7 @@ export const zcashServer = zcash
 
 export { zcashMethod as method }
 
-// ── zcash-transparent ────────────────────────────────────────────────
+// ── zcashtransparent ────────────────────────────────────────────────
 
 export const zcashTransparentRequestSchema = z.object({
   amount: z.string(),
@@ -155,7 +155,7 @@ export const zcashTransparentCredentialPayloadSchema = z.object({
 })
 
 export const zcashTransparentMethod = Method.from({
-  name: 'zcash-transparent',
+  name: 'zcashtransparent',
   intent: 'charge',
   schema: {
     request: zcashTransparentRequestSchema,
@@ -242,7 +242,7 @@ export function zcashTransparentClient(options: ZcashTransparentClientOptions = 
     async createCredential({ challenge }) {
       if (!options.createPayment) {
         throw new Error(
-          'zcash-transparent client auto-pay is not configured. Pass createPayment(...) to zcashTransparentClient().',
+          'zcashtransparent client auto-pay is not configured. Pass createPayment(...) to zcashTransparentClient().',
         )
       }
 

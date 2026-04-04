@@ -106,7 +106,7 @@ impl ZcashPaymentProvider {
 
 impl PaymentProvider for ZcashPaymentProvider {
     fn supports(&self, method: &str, intent: &str) -> bool {
-        (method == "zcash" || method == "zcash-transparent") && intent == "charge"
+        (method == "zcash" || method == "zcashtransparent") && intent == "charge"
     }
 
     async fn pay(&self, challenge: &PaymentChallenge) -> Result<PaymentCredential, MppError> {
@@ -153,7 +153,7 @@ impl PaymentProvider for ZcashPaymentProvider {
         let payload = PaymentPayload::hash(&txid);
         let mut credential = PaymentCredential::new(echo, payload);
 
-        credential.payload = if challenge.method.as_str() == "zcash-transparent" {
+        credential.payload = if challenge.method.as_str() == "zcashtransparent" {
             // Transparent: server verifies via output index (always 0 for single-recipient sends)
             serde_json::json!({ "txid": txid, "outputIndex": 0 })
         } else {
@@ -207,8 +207,8 @@ mod tests {
             },
             "https://rpc.example.com",
         );
-        assert!(provider.supports("zcash-transparent", "charge"));
-        assert!(!provider.supports("zcash-transparent", "session"));
+        assert!(provider.supports("zcashtransparent", "charge"));
+        assert!(!provider.supports("zcashtransparent", "session"));
         // shielded still works
         assert!(provider.supports("zcash", "charge"));
     }
