@@ -18,6 +18,8 @@ export interface ZimppyWalletBalance {
   spendableZat: string
   pendingZat: string
   totalZat: string
+  transparentZat: string
+  transparentPendingZat: string
 }
 
 export class ZimppyCore {
@@ -62,7 +64,9 @@ export class ZimppyWalletNapi {
   sync(): Promise<boolean>
   ensureReady(): Promise<boolean>
   address(): Promise<string>
+  transparentAddress(): Promise<string>
   balance(): Promise<ZimppyWalletBalance>
+  shield(): Promise<string>
   send(to: string, amountZat: string, memo?: string | null): Promise<string>
   seedPhrase(): Promise<string | null>
   fullAddress(): Promise<string>
