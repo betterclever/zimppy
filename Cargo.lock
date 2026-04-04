@@ -8374,7 +8374,7 @@ version = "0.4.0"
 
 [[package]]
 name = "zimppy-ai-server"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -8393,7 +8393,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "bech32 0.9.1",
@@ -8419,7 +8419,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-napi"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "napi",
  "napi-build",
@@ -8433,7 +8433,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-rs"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "futures-lite",
@@ -8443,13 +8443,14 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+ "zcash_protocol",
  "zimppy-core",
  "zimppy-wallet",
 ]
 
 [[package]]
 name = "zimppy-rust-client"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "mpp",
  "reqwest",
@@ -8462,7 +8463,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-rust-server"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -8478,7 +8479,7 @@ dependencies = [
 
 [[package]]
 name = "zimppy-wallet"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "bip0039",
