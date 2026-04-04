@@ -121,6 +121,8 @@ pub struct NapiWalletBalance {
     pub spendable_zat: String,
     pub pending_zat: String,
     pub total_zat: String,
+    pub transparent_zat: String,
+    pub transparent_pending_zat: String,
 }
 
 #[napi]
@@ -300,6 +302,8 @@ impl ZimppyWalletNapi {
             spendable_zat: bal.spendable_zat.to_string(),
             pending_zat: bal.pending_zat.to_string(),
             total_zat: bal.total_zat.to_string(),
+            transparent_zat: bal.transparent_zat.to_string(),
+            transparent_pending_zat: bal.transparent_pending_zat.to_string(),
         })
     }
 
@@ -347,6 +351,28 @@ impl ZimppyWalletNapi {
             .full_address()
             .await
             .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Get (or generate) the wallet's first transparent T-address.
+    #[napi]
+    pub async fn transparent_address(&self) -> napi::Result<String> {
+        self.ensure_open().await?;
+        let mut wallet = self.wallet.lock().await;
+        wallet
+            .transparent_address()
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Shield all transparent funds to Orchard. Returns the shielding txid.
+    #[napi]
+    pub async fn shield(&self) -> napi::Result<String> {
+        self.ensure_open().await?;
+        let mut wallet = self.wallet.lock().await;
+        wallet
+            .shield()
+            .await
+            .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))
     }
 
     /// Rescan the blockchain from birthday, rebuilding shard tree checkpoints.
