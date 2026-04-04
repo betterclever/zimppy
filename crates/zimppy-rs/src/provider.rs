@@ -70,7 +70,7 @@ impl ZcashPaymentProvider {
         eprintln!("[ZcashProvider] Memo: {memo}");
 
         let txid = wallet
-            .send(address, amount_zat, Some(memo))
+            .send(address, amount_zat, if memo.is_empty() { None } else { Some(memo) })
             .await
             .map_err(|e| MppError::InvalidConfig(format!("send failed: {e}")))?;
 
@@ -153,12 +153,12 @@ impl PaymentProvider for ZcashPaymentProvider {
         let payload = PaymentPayload::hash(&txid);
         let mut credential = PaymentCredential::new(echo, payload);
 
-        credential.payload = if memo_opt.is_some() {
-            // Shielded: server verifies via IVK, no outputIndex needed
-            serde_json::json!({ "txid": txid })
-        } else {
+        credential.payload = if challenge.method.as_str() == "zcash-transparent" {
             // Transparent: server verifies via output index (always 0 for single-recipient sends)
             serde_json::json!({ "txid": txid, "outputIndex": 0 })
+        } else {
+            // Shielded: server verifies via IVK, no outputIndex needed
+            serde_json::json!({ "txid": txid })
         };
 
         eprintln!("[ZcashProvider] Credential ready with txid {}", &txid[..16.min(txid.len())]);

@@ -190,6 +190,7 @@ export function zcashTransparent(options: ZcashTransparentServerOptions) {
   const crypto = options.verifyPayment ? null : new NapiCryptoClient(options.rpcEndpoint)
 
   return Method.toServer(zcashTransparentMethod, {
+    ...(options.tAddress ? { defaults: { recipient: options.tAddress } } : {}),
     async verify({ credential, request }) {
       const { txid, outputIndex } = credential.payload
 
