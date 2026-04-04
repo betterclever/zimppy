@@ -21,8 +21,13 @@ import {
   zcashMethod,
   zcashRequestSchema,
   zcashCredentialPayloadSchema,
+  zcashTransparent as zcashTransparentRaw,
+  zcashTransparentMethod,
+  zcashTransparentRequestSchema,
+  zcashTransparentCredentialPayloadSchema,
+  zcashTransparentClient,
 } from './mppx.js'
-import type { ZcashServerOptions, ZcashVerifyResult } from './mppx.js'
+import type { ZcashServerOptions, ZcashVerifyResult, ZcashTransparentServerOptions, ZcashTransparentVerifyResult } from './mppx.js'
 import {
   zcashSession as zcashSessionRaw,
   zcashSessionMethod,
@@ -130,6 +135,45 @@ zcash.session = async function session(options: ZcashSessionOptions = {}) {
   })
 }
 
+// ── Transparent Charge ───────────────────────────────────────────
+
+export interface ZcashTransparentOptions {
+  /** Wallet name in ~/.zimppy/wallets/. Uses active wallet if omitted. */
+  wallet?: string
+  /** Override: T-address that receives payments (skips wallet resolution) */
+  tAddress?: string
+  /** Override: Zebrad RPC endpoint */
+  rpcEndpoint?: string
+  /** Override: custom verification function */
+  verifyPayment?: ZcashTransparentServerOptions['verifyPayment']
+}
+
+/**
+ * Create a Zcash transparent charge method for the server.
+ *
+ * ```ts
+ * const method = await zcashTransparent({ wallet: 'server-wallet' })
+ * const mppx = Mppx.create({ methods: [method] })
+ * ```
+ */
+export async function zcashTransparent(
+  options: ZcashTransparentOptions = {},
+): Promise<ReturnType<typeof zcashTransparentRaw>> {
+  if (options.tAddress || options.verifyPayment) {
+    return zcashTransparentRaw({
+      tAddress: options.tAddress,
+      rpcEndpoint: options.rpcEndpoint,
+      verifyPayment: options.verifyPayment,
+    })
+  }
+
+  const w = await resolveWallet(options.wallet)
+  return zcashTransparentRaw({
+    tAddress: w.tAddress,
+    rpcEndpoint: w.rpcEndpoint,
+  })
+}
+
 // ── Re-exports ──────────────────────────────────────────────────
 
 export {
@@ -141,8 +185,13 @@ export {
   zcashSessionMethod,
   sessionRequestSchema,
   sessionCredentialPayloadSchema,
+  zcashTransparentRaw,
+  zcashTransparentMethod,
+  zcashTransparentRequestSchema,
+  zcashTransparentCredentialPayloadSchema,
+  zcashTransparentClient,
 }
-export type { ZcashServerOptions, ZcashVerifyResult, ZcashSessionServerOptions }
+export type { ZcashServerOptions, ZcashVerifyResult, ZcashSessionServerOptions, ZcashTransparentServerOptions, ZcashTransparentVerifyResult }
 
 export { NapiCryptoClient, HttpCryptoClient, createCryptoBackend } from './crypto-client.js'
 export type { CryptoBackend, ShieldedVerifyResult, VerifyShieldedRequest, VerifyTransparentRequest, VerifyResult } from './crypto-client.js'
