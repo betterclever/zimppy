@@ -298,6 +298,33 @@ impl ZimppyWallet {
             .ok_or_else(|| WalletError::Address("no transparent address found after generation".to_string()))
     }
 
+    /// Shield all transparent funds into the Orchard pool.
+    ///
+    /// Uses zingolib's `quick_shield` which proposes and broadcasts in one step.
+    /// Returns the txid of the shielding transaction.
+    /// Errors if there are no transparent funds to shield.
+    pub async fn shield(&mut self) -> Result<String, WalletError> {
+        trace_wallet(
+            "shield:begin",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
+        let txids = self
+            .client
+            .quick_shield(self.account_id())
+            .await
+            .map_err(|e| WalletError::Shield(format!("{e}")))?;
+
+        // For encrypted wallets, force a save after the shielding tx is created
+        if self.passphrase.is_some() {
+            self.client.wallet.write().await.save_required = true;
+            self.save().await?;
+        }
+
+        let txid = txids.head.to_string();
+        trace_wallet("shield:end", format!("txid={txid}"));
+        Ok(txid)
+    }
+
     /// Get the wallet's current balance.
     pub async fn balance(&self) -> Result<WalletBalance, WalletError> {
         let bal = self
@@ -832,6 +859,27 @@ mod tests {
         assert!(addr1.starts_with("tm") || addr1.starts_with("t1"),
             "expected T-address, got: {addr1}");
         assert_eq!(addr1, addr2, "should be idempotent");
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn shield_returns_error_when_no_transparent_funds() {
+        let data_dir = test_wallet_dir("shield-empty");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let mut wallet = ZimppyWallet::create(test_config(
+            data_dir.clone(),
+            Some(seed),
+            Some(3_000_000),
+        ))
+        .await
+        .expect("wallet should be created");
+
+        // Shield with no funds should return a Shield error (nothing to shield)
+        let result = wallet.shield().await;
+        assert!(matches!(result, Err(WalletError::Shield(_))),
+            "expected Shield error, got: {result:?}");
 
         let _ = fs::remove_dir_all(data_dir);
     }
