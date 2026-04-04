@@ -267,6 +267,37 @@ impl ZimppyWallet {
         Ok(ua.encode(&self.client.config().chain))
     }
 
+    /// Get (or generate) the wallet's first transparent T-address.
+    ///
+    /// Calls `generate_transparent_address` on first use to ensure an address
+    /// is derived, then reads it back from `transparent_addresses_json`.
+    /// Subsequent calls return the same address (idempotent).
+    pub async fn transparent_address(&mut self) -> Result<String, WalletError> {
+        // Check if a transparent address already exists
+        let existing = self.client.transparent_addresses_json().await;
+        let has_addr = existing
+            .members()
+            .next()
+            .and_then(|a| a["encoded_address"].as_str())
+            .is_some();
+
+        if !has_addr {
+            self.client
+                .generate_transparent_address(self.account_id(), false)
+                .await
+                .map_err(|e| WalletError::Address(format!("failed to generate transparent address: {e}")))?;
+            self.save().await?;
+        }
+
+        let addrs = self.client.transparent_addresses_json().await;
+        addrs
+            .members()
+            .next()
+            .and_then(|a| a["encoded_address"].as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| WalletError::Address("no transparent address found after generation".to_string()))
+    }
+
     /// Get the wallet's current balance.
     pub async fn balance(&self) -> Result<WalletBalance, WalletError> {
         let bal = self
@@ -778,6 +809,29 @@ mod tests {
         let first = wallet.full_address().await.expect("first full address");
         let second = wallet.full_address().await.expect("second full address");
         assert_eq!(first, second);
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn transparent_address_is_deterministic() {
+        let data_dir = test_wallet_dir("t-addr");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let mut wallet = ZimppyWallet::create(test_config(
+            data_dir.clone(),
+            Some(seed),
+            Some(3_000_000),
+        ))
+        .await
+        .expect("wallet should be created");
+
+        let addr1 = wallet.transparent_address().await.expect("first call");
+        let addr2 = wallet.transparent_address().await.expect("second call");
+        // T-addresses on testnet start with "tm"
+        assert!(addr1.starts_with("tm") || addr1.starts_with("t1"),
+            "expected T-address, got: {addr1}");
+        assert_eq!(addr1, addr2, "should be idempotent");
 
         let _ = fs::remove_dir_all(data_dir);
     }
