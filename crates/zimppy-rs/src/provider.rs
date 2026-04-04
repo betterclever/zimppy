@@ -106,11 +106,11 @@ impl ZcashPaymentProvider {
 
 impl PaymentProvider for ZcashPaymentProvider {
     fn supports(&self, method: &str, intent: &str) -> bool {
-        method == "zcash" && intent == "charge"
+        (method == "zcash" || method == "zcash-transparent") && intent == "charge"
     }
 
     async fn pay(&self, challenge: &PaymentChallenge) -> Result<PaymentCredential, MppError> {
-        // Parse challenge request to get recipient, amount, memo
+        // Parse challenge request to get recipient and amount
         let request: serde_json::Value = challenge.request.decode().map_err(|e| {
             MppError::InvalidConfig(format!("failed to decode challenge request: {e}"))
         })?;
@@ -121,16 +121,16 @@ impl PaymentProvider for ZcashPaymentProvider {
         let amount_str = request["amount"]
             .as_str()
             .ok_or_else(|| MppError::InvalidConfig("missing amount in challenge".to_string()))?;
-        let memo = request["methodDetails"]["memo"]
-            .as_str()
-            .ok_or_else(|| {
-                MppError::InvalidConfig("missing methodDetails.memo in challenge".to_string())
-            })?
-            .replace("{id}", &challenge.id);
 
         let amount_zat: u64 = amount_str
             .parse()
             .map_err(|_| MppError::InvalidConfig("invalid amount".to_string()))?;
+
+        // Memo is present for shielded payments, absent for transparent
+        let memo_opt = request["methodDetails"]["memo"]
+            .as_str()
+            .map(|m| m.replace("{id}", &challenge.id));
+        let memo = memo_opt.as_deref().unwrap_or("");
 
         eprintln!("[ZcashProvider] Received 402 challenge:");
         eprintln!(
@@ -138,24 +138,30 @@ impl PaymentProvider for ZcashPaymentProvider {
             &recipient[..20.min(recipient.len())]
         );
         eprintln!("[ZcashProvider]   amount: {} zat", amount_zat);
-        eprintln!("[ZcashProvider]   memo: {}", &memo);
+        if !memo.is_empty() {
+            eprintln!("[ZcashProvider]   memo: {}", memo);
+        }
 
-        // Send real ZEC
-        let txid = self.send_payment(recipient, amount_zat, &memo).await?;
+        // Send ZEC (works for both T-addresses and shielded addresses)
+        let txid = self.send_payment(recipient, amount_zat, memo).await?;
 
-        // Wait for confirmation
+        // Wait for on-chain confirmation
         self.wait_for_confirmation(&txid).await?;
 
-        // Build credential
+        // Build credential — include outputIndex for transparent, omit for shielded
         let echo = challenge.to_echo();
         let payload = PaymentPayload::hash(&txid);
         let mut credential = PaymentCredential::new(echo, payload);
 
-        credential.payload = serde_json::json!({
-            "txid": txid,
-        });
+        credential.payload = if memo_opt.is_some() {
+            // Shielded: server verifies via IVK, no outputIndex needed
+            serde_json::json!({ "txid": txid })
+        } else {
+            // Transparent: server verifies via output index (always 0 for single-recipient sends)
+            serde_json::json!({ "txid": txid, "outputIndex": 0 })
+        };
 
-        eprintln!("[ZcashProvider] Credential ready with txid {}", &txid[..16]);
+        eprintln!("[ZcashProvider] Credential ready with txid {}", &txid[..16.min(txid.len())]);
         Ok(credential)
     }
 }
@@ -184,5 +190,26 @@ mod tests {
         assert!(provider.supports("zcash", "charge"));
         assert!(!provider.supports("tempo", "charge"));
         assert!(!provider.supports("zcash", "session"));
+    }
+
+    #[test]
+    fn supports_zcash_transparent_charge() {
+        let provider = ZcashPaymentProvider::new(
+            WalletConfig {
+                data_dir: PathBuf::from("/tmp/w"),
+                lwd_endpoint: "https://testnet.zec.rocks".to_string(),
+                network: NetworkType::Test,
+                seed_phrase: None,
+                birthday_height: None,
+                account_index: 0,
+                num_accounts: 1,
+                passphrase: None,
+            },
+            "https://rpc.example.com",
+        );
+        assert!(provider.supports("zcash-transparent", "charge"));
+        assert!(!provider.supports("zcash-transparent", "session"));
+        // shielded still works
+        assert!(provider.supports("zcash", "charge"));
     }
 }
