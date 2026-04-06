@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>zimppy 0.5</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 1200px;
+      height: 630px;
+      overflow: hidden;
+    }
+
+    body {
+      background: #060609;
+      font-family: 'Instrument Sans', sans-serif;
+      position: relative;
+    }
+
+    /* ── background orbs — these get blurred by the glass card ── */
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+      filter: blur(72px);
+    }
+    .orb-1 {
+      width: 560px; height: 520px;
+      left: -80px; top: -100px;
+      background: radial-gradient(circle, rgba(139,92,246,0.80), rgba(109,40,217,0.35) 60%, transparent 100%);
+      z-index: 0;
+    }
+    .orb-2 {
+      width: 420px; height: 380px;
+      right: 20px; top: -80px;
+      background: radial-gradient(circle, rgba(56,189,248,0.50), rgba(14,165,233,0.18) 60%, transparent 100%);
+      z-index: 0;
+    }
+    .orb-3 {
+      width: 340px; height: 300px;
+      right: 60px; bottom: -50px;
+      background: radial-gradient(circle, rgba(52,211,153,0.38), transparent 70%);
+      z-index: 0;
+    }
+    .orb-4 {
+      width: 300px; height: 260px;
+      left: 180px; bottom: -40px;
+      background: radial-gradient(circle, rgba(167,139,250,0.45), transparent 70%);
+      z-index: 0;
+    }
+
+    /* ── zcash ascii bg ── */
+    #zcash-canvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.22;
+    }
+
+    /* ── texture ── */
+    #dots, #noise {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    #dots  { z-index: 2; }
+    #noise { z-index: 3; }
+
+    /* ── outer frame ── */
+    .frame {
+      position: absolute;
+      inset: 0;
+      padding: 28px;
+      z-index: 4;
+    }
+
+    /* ── main glass card ── */
+    .card {
+      width: 100%;
+      height: 100%;
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,0.10);
+      /* low opacity — orbs bleed through without needing backdrop-filter */
+      background: rgba(6,6,12,0.52);
+      box-shadow:
+        inset 0 1.5px 0 rgba(255,255,255,0.10),
+        inset 0 -1px 0 rgba(255,255,255,0.03),
+        inset 1px 0 0 rgba(255,255,255,0.04),
+        0 24px 80px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(0,0,0,0.3);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      padding: 38px 44px 36px;
+      position: relative;
+    }
+
+    /* top rim highlight — the main glass "frosted" feel */
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(255,255,255,0.18) 20%,
+        rgba(255,255,255,0.28) 50%,
+        rgba(255,255,255,0.18) 80%,
+        transparent 100%
+      );
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* subtle inner vignette at edges */
+    .card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04) 0%, transparent 12%),
+        linear-gradient(135deg, rgba(139,92,246,0.06) 0%, transparent 40%);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* ── zcash/acc badge ── */
+    .zcash-acc {
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .zcash-acc .text {
+      font-family: 'Instrument Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      font-style: italic;
+      color: rgba(167,139,250,0.55);
+      letter-spacing: 0.12em;
+    }
+    .zcash-acc .rush {
+      font-family: 'Instrument Sans', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      font-style: italic;
+      color: rgba(167,139,250,0.35);
+      letter-spacing: -0.08em;
+      transform: scaleX(1.4);
+      display: inline-block;
+    }
+
+    /* ── github mark ── */
+    .github {
+      position: absolute;
+      top: 36px;
+      right: 44px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: rgba(255,255,255,0.28);
+      letter-spacing: 0.04em;
+      z-index: 5;
+    }
+    .github svg {
+      width: 14px; height: 14px;
+      fill: rgba(255,255,255,0.28);
+      flex-shrink: 0;
+    }
+
+    /* ── two-column body ── */
+    .body {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: stretch;
+      margin-top: 8px;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* ── left: hero ── */
+    .hero {
+      padding-right: 48px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      height: 100%;
+    }
+
+    .hero-title {
+      font-size: 80px;
+      font-weight: 700;
+      line-height: 0.92;
+      letter-spacing: -0.04em;
+      color: #f2f2f8;
+    }
+
+    .hero-title .mpp-brand { color: #a78bfa; }
+
+    .hero-title .xyz {
+      font-size: 50px;
+      color: rgba(167,139,250,0.25);
+      letter-spacing: -0.02em;
+      font-weight: 600;
+    }
+
+    .hero-title .version {
+      color: #a78bfa;
+      font-size: 46px;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-tagline {
+      margin-top: 28px;
+      font-size: 18px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.34);
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+    }
+
+    .hero-also {
+      margin-top: 12px;
+      font-size: 13px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.38);
+      letter-spacing: 0.06em;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    .hero-claim {
+      margin-top: 6px;
+      font-size: 22px;
+      font-weight: 600;
+      color: rgba(167,139,250,0.75);
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+    }
+
+    /* ── right: frosted glass changelog panel ── */
+    .changelog-wrap {
+      padding-left: 32px;
+      display: flex;
+      align-items: center;
+    }
+
+    .changelog {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      backdrop-filter: blur(12px) saturate(1.2);
+      -webkit-backdrop-filter: blur(12px) saturate(1.2);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -1px 0 rgba(255,255,255,0.02),
+        0 8px 32px rgba(0,0,0,0.25);
+      padding: 24px 26px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* glass sheen on the panel */
+    .changelog::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent,
+        rgba(255,255,255,0.16) 30%,
+        rgba(255,255,255,0.22) 55%,
+        rgba(255,255,255,0.12) 80%,
+        transparent
+      );
+    }
+
+    /* subtle violet tint in top-left of panel */
+    .changelog::after {
+      content: '';
+      position: absolute;
+      top: -20px; left: -20px;
+      width: 140px; height: 140px;
+      background: radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%);
+      pointer-events: none;
+    }
+
+    .changelog-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(167,139,250,0.60);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 17px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cl-items {
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cl-item {
+      padding: 13px 0;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .cl-item:last-child {
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .cl-title {
+      font-size: 15.5px;
+      font-weight: 600;
+      color: #e0e0ea;
+      letter-spacing: -0.01em;
+    }
+
+    .cl-desc {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12.5px;
+      color: rgba(255,255,255,0.25);
+      letter-spacing: 0.01em;
+      line-height: 1.45;
+    }
+
+    .cl-fix .cl-title {
+      color: #e0e0ea;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- orbs behind everything — the glass card blurs these -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="orb orb-4"></div>
+
+  <canvas id="zcash-canvas" width="1200" height="630"></canvas>
+  <canvas id="dots" width="1200" height="630"></canvas>
+  <canvas id="noise" width="1200" height="630"></canvas>
+
+  <div class="frame">
+    <div class="card">
+
+      <div class="github">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+        </svg>
+        betterclever/zimppy
+      </div>
+
+      <div class="body">
+
+        <div class="hero">
+          <h1 class="hero-title">zi<span class="mpp-brand">mpp</span>y<span class="xyz">.xyz</span><br><span class="version">v0.5</span></h1>
+          <p class="hero-tagline">the privacy stack for mpp.</p>
+          <p class="hero-also">is now also</p>
+          <p class="hero-claim">the most capable<br>zcash CLI wallet.</p>
+          <div class="zcash-acc">
+            <span class="text">zcash/acc</span>
+            <span class="rush">&#x276F;&#x276F;&#x276F;</span>
+          </div>
+        </div>
+
+        <div class="changelog-wrap">
+          <div class="changelog">
+            <div class="changelog-label">what's new</div>
+            <div class="cl-items">
+
+              <div class="cl-item">
+                <div class="cl-title">CLI wallet: shielded + transparent + multi-account</div>
+                <div class="cl-desc">send · shield · balance --all · wallet transfer</div>
+              </div>
+
+              <div class="cl-item">
+                <div class="cl-title">Transparent payment stack</div>
+                <div class="cl-desc">T-addresses · mpp zcashtransparent method</div>
+              </div>
+
+              <div class="cl-item">
+                <div class="cl-title">Replay-safe by design</div>
+                <div class="cl-desc">Fresh BIP44 address per 402 challenge</div>
+              </div>
+
+              <div class="cl-item">
+                <div class="cl-title">Multi-account rotation</div>
+                <div class="cl-desc">Back-to-back sends · ZIP-32 account pools</div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Zcash ASCII logo (ported from main site, static) ──
+    (function () {
+      const canvas = document.getElementById('zcash-canvas');
+      const ctx = canvas.getContext('2d');
+      const charSet = 'zimppy·:;=+*#%@░▒▓█'.split('');
+      const cellW = 12, cellH = 18;
+      const cols = Math.ceil(canvas.width / cellW);
+      const rows = Math.ceil(canvas.height / cellH);
+
+      // Build Zcash shape mask
+      const off = document.createElement('canvas');
+      off.width = canvas.width; off.height = canvas.height;
+      const offCtx = off.getContext('2d');
+      const cx = canvas.width * 0.28, cy = canvas.height * 0.50;
+      const r = Math.min(canvas.width, canvas.height) * 0.30;
+
+      offCtx.beginPath();
+      offCtx.arc(cx, cy, r, 0, Math.PI * 2);
+      offCtx.fillStyle = '#fff';
+      offCtx.fill();
+      offCtx.globalCompositeOperation = 'destination-out';
+      offCtx.beginPath();
+      offCtx.arc(cx, cy, r * 0.74, 0, Math.PI * 2);
+      offCtx.fill();
+      offCtx.globalCompositeOperation = 'source-over';
+      offCtx.fillStyle = '#fff';
+      offCtx.strokeStyle = '#fff';
+      // Z is smaller so there's clear gap between Z and the ring
+      const zw = r * 0.36, zh = r * 0.40, bar = r * 0.14;
+      // Top horizontal bar
+      offCtx.fillRect(cx - zw, cy - zh, zw * 2, bar);
+      // Bottom horizontal bar
+      offCtx.fillRect(cx - zw, cy + zh - bar, zw * 2, bar);
+      // Diagonal — uniform stroke, flat ends
+      offCtx.lineWidth = bar;
+      offCtx.lineCap = 'butt';
+      offCtx.beginPath();
+      offCtx.moveTo(cx + zw, cy - zh + bar);
+      offCtx.lineTo(cx - zw, cy + zh - bar);
+      offCtx.stroke();
+      // Stubs: same width as bar, 1.8x taller
+      offCtx.fillRect(cx - bar * 0.5, cy - zh - bar * 1.44, bar, bar * 1.44);
+      offCtx.fillRect(cx - bar * 0.5, cy + zh, bar, bar * 1.44);
+
+      const imgData = offCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+      ctx.font = `${cellH - 4}px 'IBM Plex Mono', monospace`;
+      ctx.textBaseline = 'top';
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const px = Math.floor(col * cellW + cellW / 2);
+          const py = Math.floor(row * cellH + cellH / 2);
+          const alpha = imgData[(py * canvas.width + px) * 4 + 3] || 0;
+          if (alpha > 128) {
+            ctx.fillStyle = 'rgba(255,255,255,1)';
+            ctx.fillText(charSet[Math.floor(Math.random() * charSet.length)], col * cellW, row * cellH);
+          } else if (Math.random() < 0.04) {
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.fillText('·', col * cellW, row * cellH);
+          }
+        }
+      }
+    }());
+
+    (function () {
+      const c = document.getElementById('dots');
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      for (let x = 28; x < c.width; x += 28)
+        for (let y = 28; y < c.height; y += 28) {
+          ctx.beginPath();
+          ctx.arc(x, y, 0.75, 0, Math.PI * 2);
+          ctx.fill();
+        }
+    }());
+
+    (function () {
+      const c = document.getElementById('noise');
+      const ctx = c.getContext('2d');
+      const img = ctx.createImageData(c.width, c.height);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const v = Math.random();
+        d[i] = d[i+1] = d[i+2] = 255;
+        d[i+3] = v < 0.5 ? 0 : Math.floor((v - 0.5) * 2 * 10);
+      }
+      ctx.putImageData(img, 0, 0);
+    }());
+  </script>
+</body>
+</html>

@@ -5,9 +5,9 @@
 [![npm](https://img.shields.io/npm/v/zimppy-ts?label=zimppy-ts)](https://www.npmjs.com/package/zimppy-ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**One deposit. Instant payments. Full privacy.**
+**The most capable Zcash CLI wallet for agents and humans.**
 
-Zimppy is the [MPP](https://mpp.dev) payment method for Zcash. Deposit once on-chain, then make unlimited instant bearer requests with no per-request chain interaction. Every payment is shielded: sender, receiver, amount, and memo are all encrypted.
+Zimppy is the [MPP](https://mpp.dev) payment method for Zcash — shielded and transparent. Deposit once on-chain, then make unlimited instant bearer requests with no per-request chain interaction. Shielded payments encrypt sender, receiver, amount, and memo. Transparent payments use per-challenge T-addresses for replay prevention.
 
 [zimppy.xyz](https://zimppy.xyz)
 
@@ -20,19 +20,20 @@ npm install zimppy-ts       # TypeScript SDK
 
 ```toml
 [dependencies]
-zimppy-core = "0.3"         # Rust verification engine
-zimppy-rs = "0.3"           # Rust SDK (charge, session, axum)
+zimppy-core = "0.5"         # Rust verification engine
+zimppy-rs = "0.5"           # Rust SDK (charge, session, axum)
 ```
 
 ## Why shielded payments for agents
 
-| | Public chains (USDC, ETH) | zimppy (ZEC) |
-|---|---|---|
-| Sender | Visible on-chain | Encrypted |
-| Receiver | Visible on-chain | Encrypted |
-| Amount | Visible on-chain | Encrypted |
-| Memo | Visible on-chain | Encrypted |
-| Service usage pattern | Linkable | Private |
+| | Public chains (USDC, ETH) | zimppy shielded | zimppy transparent |
+|---|---|---|---|
+| Sender | Visible | Encrypted | Visible |
+| Receiver | Visible | Encrypted | Per-challenge (unlinkable) |
+| Amount | Visible | Encrypted | Visible |
+| Memo | Visible | Encrypted | N/A |
+| Replay protection | None | Memo binding | Per-challenge T-address |
+| Service usage pattern | Linkable | Private | Unlinkable (fresh addr) |
 
 For AI agents handling sensitive workflows — legal research, medical queries, financial analysis, competitive intelligence — every public payment is a metadata leak. Zimppy is the only MPP payment method that is private by default.
 
@@ -112,6 +113,17 @@ if (result.status === 402) return result.challenge
 return result.withReceipt(Response.json({ data }))
 ```
 
+**TypeScript (transparent)**
+```ts
+import { Mppx } from 'mppx/server'
+import { zcashTransparent } from 'zimppy-ts/server'
+
+const mppx = Mppx.create({
+  methods: [await zcashTransparent({ wallet: 'server' })],
+  // per-challenge T-address generated automatically (replay-safe)
+})
+```
+
 **Rust (axum)**
 ```rust
 use mpp::server::axum::*;
@@ -157,18 +169,23 @@ let resp = client
 
 ```bash
 npx zimppy wallet create              # generate keys, show seed phrase
-npx zimppy wallet whoami              # address, balance, network
-npx zimppy request <url>              # auto 402 -> pay -> retry
-npx zimppy wallet send <addr> 42000   # shielded transfer
+npx zimppy wallet whoami              # address (UA + T-addr), balance, network
+npx zimppy wallet balance --all       # per-account balance breakdown
+npx zimppy wallet send <addr> 42000   # shielded or transparent transfer
+npx zimppy wallet transfer 0 1 50000  # cross-account send
+npx zimppy wallet shield              # move transparent funds to Orchard
 npx zimppy wallet use work            # switch wallet identity
+npx zimppy request <url>              # auto 402 -> pay -> retry
 ```
 
 ## What's included
 
 - **Sessions** — deposit once, instant bearer requests, refund on close
 - **Streaming** — pay-per-token metered content over SSE
-- **Charge** — single shielded payment per request (HTTP 402)
-- **CLI** — `npx zimppy request` with automatic payment handling
+- **Charge** — shielded or transparent payment per request (HTTP 402)
+- **Transparent payments** — T-addresses, per-challenge replay prevention, shield command
+- **Multi-account** — ZIP-32 account rotation, cross-account transfers, per-account balances
+- **CLI wallet** — send, shield, transfer, balance --all, whoami, auto-pay
 - **Dual SDK** — TypeScript and Rust
 - **Spec-compliant** — HMAC-SHA256 challenges, RFC 9457 errors, `/.well-known/payment` discovery
 
