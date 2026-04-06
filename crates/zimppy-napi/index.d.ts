@@ -45,6 +45,8 @@ export class ZimppyWalletNapi {
     lwdEndpoint: string,
     network: string,
     passphrase?: string | null,
+    accountIndex?: number | null,
+    numAccounts?: number | null,
   ): Promise<ZimppyWalletNapi>
   static create(
     dataDir: string,
@@ -52,6 +54,8 @@ export class ZimppyWalletNapi {
     network: string,
     birthdayHeight?: number | null,
     passphrase?: string | null,
+    accountIndex?: number | null,
+    numAccounts?: number | null,
   ): Promise<ZimppyWalletNapi>
   static restore(
     dataDir: string,
@@ -60,12 +64,19 @@ export class ZimppyWalletNapi {
     seedPhrase: string,
     birthdayHeight: number,
     passphrase?: string | null,
+    accountIndex?: number | null,
+    numAccounts?: number | null,
   ): Promise<ZimppyWalletNapi>
   sync(): Promise<boolean>
   ensureReady(): Promise<boolean>
   address(): Promise<string>
   transparentAddress(): Promise<string>
+  generateNextTransparentAddress(): Promise<string>
+  transparentAddresses(): Promise<string[]>
   balance(): Promise<ZimppyWalletBalance>
+  balanceForAccount(accountIndex: number): Promise<ZimppyWalletBalance>
+  numAccounts(): Promise<number>
+  createAccount(): Promise<number>
   shield(): Promise<string>
   send(to: string, amountZat: string, memo?: string | null): Promise<string>
   seedPhrase(): Promise<string | null>

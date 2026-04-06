@@ -152,12 +152,14 @@ impl ZimppyWalletNapi {
         lwd_endpoint: String,
         network: String,
         passphrase: Option<String>,
+        account_index: Option<u32>,
+        num_accounts: Option<u32>,
     ) -> napi::Result<Self> {
         trace_napi(
             "open",
             format!("data_dir={} lwd_endpoint={} network={}", data_dir, lwd_endpoint, network),
         );
-        Self::open_inner(data_dir, lwd_endpoint, network, None, None, false, passphrase).await
+        Self::open_inner(data_dir, lwd_endpoint, network, None, None, false, passphrase, account_index, num_accounts).await
     }
 
     /// Create a fresh wallet and persist it immediately.
@@ -168,8 +170,10 @@ impl ZimppyWalletNapi {
         network: String,
         birthday_height: Option<u32>,
         passphrase: Option<String>,
+        account_index: Option<u32>,
+        num_accounts: Option<u32>,
     ) -> napi::Result<Self> {
-        Self::open_inner(data_dir, lwd_endpoint, network, None, birthday_height, true, passphrase).await
+        Self::open_inner(data_dir, lwd_endpoint, network, None, birthday_height, true, passphrase, account_index, num_accounts).await
     }
 
     /// Restore a wallet from a seed phrase and persist it immediately.
@@ -181,6 +185,8 @@ impl ZimppyWalletNapi {
         seed_phrase: String,
         birthday_height: u32,
         passphrase: Option<String>,
+        account_index: Option<u32>,
+        num_accounts: Option<u32>,
     ) -> napi::Result<Self> {
         Self::open_inner(
             data_dir,
@@ -190,6 +196,8 @@ impl ZimppyWalletNapi {
             Some(birthday_height),
             true,
             passphrase,
+            account_index,
+            num_accounts,
         )
         .await
     }
@@ -202,6 +210,8 @@ impl ZimppyWalletNapi {
         birthday_height: Option<u32>,
         create: bool,
         passphrase: Option<String>,
+        account_index: Option<u32>,
+        num_accounts: Option<u32>,
     ) -> napi::Result<Self> {
         let network_type = match network.as_str() {
             "mainnet" => zcash_protocol::consensus::NetworkType::Main,
@@ -214,8 +224,8 @@ impl ZimppyWalletNapi {
             network: network_type,
             seed_phrase,
             birthday_height,
-            account_index: 0,
-            num_accounts: 1,
+            account_index: account_index.unwrap_or(0),
+            num_accounts: num_accounts.unwrap_or(1),
             passphrase,
         };
 
@@ -403,6 +413,65 @@ impl ZimppyWalletNapi {
         let wallet = self.wallet.lock().await;
         wallet.set_min_confirmations(min_conf).await;
         Ok(())
+    }
+
+    /// Generate the next transparent address for this wallet.
+    #[napi]
+    pub async fn generate_next_transparent_address(&self) -> napi::Result<String> {
+        self.ensure_open().await?;
+        let mut wallet = self.wallet.lock().await;
+        wallet
+            .generate_next_transparent_address()
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Get all transparent addresses for this wallet.
+    #[napi]
+    pub async fn transparent_addresses(&self) -> napi::Result<Vec<String>> {
+        self.ensure_open().await?;
+        let wallet = self.wallet.lock().await;
+        wallet
+            .transparent_addresses()
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Get the balance for a specific account index.
+    #[napi]
+    pub async fn balance_for_account(&self, account_index: u32) -> napi::Result<NapiWalletBalance> {
+        self.ensure_open().await?;
+        let wallet = self.wallet.lock().await;
+        let bal = wallet
+            .balance_for_account(account_index)
+            .await
+            .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))?;
+        Ok(NapiWalletBalance {
+            spendable_zat: bal.spendable_zat.to_string(),
+            pending_zat: bal.pending_zat.to_string(),
+            total_zat: bal.total_zat.to_string(),
+            transparent_zat: bal.transparent_zat.to_string(),
+            transparent_pending_zat: bal.transparent_pending_zat.to_string(),
+        })
+    }
+
+    /// Get the number of accounts in this wallet.
+    #[napi]
+    pub async fn num_accounts(&self) -> napi::Result<u32> {
+        self.ensure_open().await?;
+        let wallet = self.wallet.lock().await;
+        Ok(wallet.num_accounts().await)
+    }
+
+    /// Create a new account in this wallet. Returns the new account index.
+    #[napi]
+    pub async fn create_account(&self) -> napi::Result<u32> {
+        self.ensure_open().await?;
+        let mut wallet = self.wallet.lock().await;
+        wallet
+            .create_account()
+            .await
+            .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))
     }
 
     #[napi]

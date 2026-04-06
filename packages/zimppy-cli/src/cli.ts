@@ -251,23 +251,48 @@ async function walletWhoami(): Promise<void> {
   }
 }
 
-async function walletBalance(): Promise<void> {
+async function walletBalance(args: string[] = []): Promise<void> {
+  const showAll = args.includes('--all')
   const cfg = requireConfig()
   let wallet: ZimppyWalletNapi | null = null
   try {
     wallet = await openWallet(cfg)
     await syncWallet(wallet, 'Syncing wallet')
 
-    const bal = await wallet.balance()
+    if (showAll) {
+      const numAccounts = await wallet.numAccounts()
+      let totalShielded = 0n
+      let totalTransparent = 0n
 
-    console.log(`--- Wallet Balance ---`)
-    console.log(`  Shielded spendable:  ${bal.spendableZat} zat`)
-    console.log(`  Shielded pending:    ${bal.pendingZat} zat`)
-    console.log(`  Shielded total:      ${bal.totalZat} zat`)
-    console.log(`  Transparent:         ${bal.transparentZat} zat`)
-    console.log(`  Transparent pending: ${bal.transparentPendingZat} zat`)
-    console.log(`  Network:             ${cfg.network}`)
-    console.log(`---`)
+      console.log(`--- Wallet Balance (all accounts) ---`)
+      for (let i = 0; i < numAccounts; i++) {
+        const bal = await wallet.balanceForAccount(i)
+        const shielded = BigInt(bal.totalZat)
+        const transparent = BigInt(bal.transparentZat)
+        totalShielded += shielded
+        totalTransparent += transparent
+        console.log(`  Account ${i}:`)
+        console.log(`    Shielded:    ${bal.totalZat} zat`)
+        console.log(`    Transparent: ${bal.transparentZat} zat`)
+      }
+      console.log(`  ---`)
+      console.log(`  Total shielded:    ${totalShielded.toString()} zat`)
+      console.log(`  Total transparent: ${totalTransparent.toString()} zat`)
+      console.log(`  Total:             ${(totalShielded + totalTransparent).toString()} zat`)
+      console.log(`  Network:           ${cfg.network}`)
+      console.log(`---`)
+    } else {
+      const bal = await wallet.balance()
+
+      console.log(`--- Wallet Balance ---`)
+      console.log(`  Shielded spendable:  ${bal.spendableZat} zat`)
+      console.log(`  Shielded pending:    ${bal.pendingZat} zat`)
+      console.log(`  Shielded total:      ${bal.totalZat} zat`)
+      console.log(`  Transparent:         ${bal.transparentZat} zat`)
+      console.log(`  Transparent pending: ${bal.transparentPendingZat} zat`)
+      console.log(`  Network:             ${cfg.network}`)
+      console.log(`---`)
+    }
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
   } finally {
@@ -932,7 +957,7 @@ Commands:
   zimppy wallet list             List all wallets
   zimppy wallet use <name>       Switch active wallet
   zimppy wallet whoami           Show address + balance + network
-  zimppy wallet balance          Show balance
+  zimppy wallet balance [--all]  Show balance (--all for per-account breakdown)
   zimppy wallet seed             Show seed phrase (for backup)
   zimppy wallet send <addr> <zat> Send ZEC (--wait to block until confirmed)
   zimppy wallet fund             How to add funds
@@ -969,7 +994,7 @@ Examples:
       case 'list': return walletList()
       case 'use': return walletUse(args[2])
       case 'whoami': return walletWhoami()
-      case 'balance': return walletBalance()
+      case 'balance': return walletBalance(args.slice(2))
       case 'send': return walletSend(args.slice(2))
       case 'seed': return walletSeed()
       case 'fund': return walletFund()

@@ -14,7 +14,7 @@
  */
 
 import { Store } from 'mppx'
-import { resolveWallet } from './wallet.js'
+import { resolveWallet, openWallet } from './wallet.js'
 import { NapiCryptoClient } from './crypto-client.js'
 import {
   zcash as zcashRaw,
@@ -146,10 +146,15 @@ export interface ZcashTransparentOptions {
   rpcEndpoint?: string
   /** Override: custom verification function */
   verifyPayment?: ZcashTransparentServerOptions['verifyPayment']
+  /** Generate a fresh T-address per challenge for replay prevention. Defaults to true. */
+  perChallenge?: boolean
 }
 
 /**
  * Create a Zcash transparent charge method for the server.
+ *
+ * By default, generates a fresh T-address per challenge for replay prevention.
+ * Pass `perChallenge: false` to use a single static T-address instead.
  *
  * ```ts
  * const method = await zcashTransparent({ wallet: 'server-wallet' })
@@ -167,10 +172,22 @@ export async function zcashTransparent(
     })
   }
 
-  const w = await resolveWallet(options.wallet)
+  const { wallet, config } = await openWallet(options.wallet)
+
+  if (options.perChallenge === false) {
+    // Static mode: use a single T-address (closes wallet after resolving)
+    const tAddress = await wallet.transparentAddress()
+    await wallet.close().catch(() => {})
+    return zcashTransparentRaw({
+      tAddress,
+      rpcEndpoint: config.rpcEndpoint,
+    })
+  }
+
+  // Per-challenge mode (default): keep wallet open, generate fresh address per challenge
   return zcashTransparentRaw({
-    tAddress: w.tAddress,
-    rpcEndpoint: w.rpcEndpoint,
+    rpcEndpoint: config.rpcEndpoint,
+    generateAddress: () => wallet.generateNextTransparentAddress(),
   })
 }
 

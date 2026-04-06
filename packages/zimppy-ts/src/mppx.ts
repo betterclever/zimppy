@@ -176,6 +176,8 @@ export interface ZcashTransparentServerOptions {
   tAddress?: string
   /** Zebrad RPC endpoint */
   rpcEndpoint?: string
+  /** Generate a fresh T-address per challenge (for replay prevention) */
+  generateAddress?: () => Promise<string>
   /** Override: custom verification function (skips NAPI verify) */
   verifyPayment?: (parameters: {
     amount: string
@@ -190,7 +192,18 @@ export function zcashTransparent(options: ZcashTransparentServerOptions) {
   const crypto = options.verifyPayment ? null : new NapiCryptoClient(options.rpcEndpoint)
 
   return Method.toServer(zcashTransparentMethod, {
-    ...(options.tAddress ? { defaults: { recipient: options.tAddress } } : {}),
+    ...(options.tAddress && !options.generateAddress ? { defaults: { recipient: options.tAddress } } : {}),
+    // When generateAddress is provided, inject a fresh T-address per challenge via the request hook
+    ...(options.generateAddress ? {
+      async request({ credential, request }: { credential?: unknown; request: z.input<typeof zcashTransparentRequestSchema> }) {
+        // Only inject address on challenge creation (no credential yet), not on verification
+        if (!credential && !request.recipient) {
+          const freshAddress = await options.generateAddress!()
+          return { ...request, recipient: freshAddress }
+        }
+        return request
+      },
+    } : {}),
     async verify({ credential, request }) {
       const { txid, outputIndex } = credential.payload
 

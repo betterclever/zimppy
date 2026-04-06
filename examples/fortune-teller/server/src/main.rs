@@ -107,6 +107,9 @@ async fn main() {
         network: zcash_protocol::consensus::NetworkType::Test,
         seed_phrase,
         birthday_height: None,
+        account_index: 0,
+        num_accounts: 1,
+        passphrase: None,
     };
 
     let session = match ZimppyWallet::open(refund_config.clone()).await {
