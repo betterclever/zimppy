@@ -237,6 +237,35 @@ impl ZimppyWallet {
             .ok_or_else(|| WalletError::Address("no addresses found".to_string()))
     }
 
+    /// Get the default unified address for a specific account.
+    /// Auto-generates a UA if one doesn't exist yet for that account.
+    pub async fn address_for_account(&mut self, account_index: u32) -> Result<String, WalletError> {
+        use zingolib::wallet::keys::unified::ReceiverSelection;
+
+        let account_id = zip32::AccountId::try_from(account_index)
+            .map_err(|_| WalletError::Client(format!("invalid account index: {account_index}")))?;
+
+        // Check if a UA already exists for this account
+        let addrs = self.client.unified_addresses_json().await;
+        if let Some(encoded) = addrs
+            .members()
+            .find(|a| a["account"].as_u32() == Some(account_index))
+            .and_then(|a| a["encoded_address"].as_str())
+        {
+            return Ok(encoded.to_string());
+        }
+
+        // Generate a default UA for this account
+        let (_id, ua) = self
+            .client
+            .generate_unified_address(ReceiverSelection::all_shielded(), account_id)
+            .await
+            .map_err(|e| WalletError::Address(format!("failed to generate address for account {account_index}: {e:?}")))?;
+
+        self.save().await?;
+        Ok(ua.encode(&self.client.config().chain))
+    }
+
     /// Generate a unified address with both Sapling and Orchard receivers.
     /// Returns an existing full shielded UA if one was already created.
     pub async fn full_address(&mut self) -> Result<String, WalletError> {

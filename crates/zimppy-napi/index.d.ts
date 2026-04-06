@@ -70,6 +70,7 @@ export class ZimppyWalletNapi {
   sync(): Promise<boolean>
   ensureReady(): Promise<boolean>
   address(): Promise<string>
+  addressForAccount(accountIndex: number): Promise<string>
   transparentAddress(): Promise<string>
   generateNextTransparentAddress(): Promise<string>
   transparentAddresses(): Promise<string[]>
@@ -79,6 +80,7 @@ export class ZimppyWalletNapi {
   createAccount(): Promise<number>
   shield(): Promise<string>
   send(to: string, amountZat: string, memo?: string | null): Promise<string>
+  sendFromAccount(accountIndex: number, to: string, amountZat: string, memo?: string | null): Promise<string>
   seedPhrase(): Promise<string | null>
   fullAddress(): Promise<string>
   rescan(): Promise<void>

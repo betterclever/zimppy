@@ -329,6 +329,55 @@ async function walletShield(): Promise<void> {
   }
 }
 
+async function walletTransfer(args: string[]): Promise<void> {
+  const fromAccount = Number(args[0])
+  const toAccount = Number(args[1])
+  const amountZat = args[2]
+
+  if (isNaN(fromAccount) || isNaN(toAccount) || !amountZat) {
+    console.error('Usage: zimppy wallet transfer <from_account> <to_account> <amount_zat>')
+    console.error('')
+    console.error('Transfer ZEC between accounts within the same wallet.')
+    console.error('  from_account   Source account index (e.g., 0)')
+    console.error('  to_account     Destination account index (e.g., 1)')
+    console.error('  amount_zat     Amount in zatoshis')
+    process.exit(1)
+  }
+
+  const cfg = requireConfig()
+  let wallet: ZimppyWalletNapi | null = null
+  try {
+    wallet = await openWallet(cfg)
+    await syncWallet(wallet, 'Syncing wallet')
+
+    const numAccounts = await wallet.numAccounts()
+    if (fromAccount >= numAccounts || toAccount >= numAccounts) {
+      console.error(`ERROR: Wallet has ${numAccounts} account(s) (indices 0-${numAccounts - 1})`)
+      process.exit(1)
+    }
+    if (fromAccount === toAccount) {
+      console.error('ERROR: Source and destination accounts must be different')
+      process.exit(1)
+    }
+
+    // Get destination address
+    const toAddr = await wallet.addressForAccount(toAccount)
+    const fromBal = await wallet.balanceForAccount(fromAccount)
+    console.log(`  From account ${fromAccount}: ${fromBal.totalZat} zat`)
+    console.log(`  To account ${toAccount}: ${toAddr.slice(0, 25)}...`)
+    console.log(`  Amount: ${amountZat} zat`)
+
+    const sp = ui.spinner(`Sending ${amountZat} zat from account ${fromAccount} to account ${toAccount}`)
+    const txid = await wallet.sendFromAccount(fromAccount, toAddr, amountZat, null)
+    sp.ok(`Sent — txid: ${txid}`)
+    console.log(`  txid: ${txid}`)
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+  } finally {
+    await wallet?.close().catch(() => {})
+  }
+}
+
 async function walletList(): Promise<void> {
   if (!existsSync(WALLETS_DIR)) {
     console.error('No wallets found. Run: zimppy wallet create')
@@ -960,6 +1009,7 @@ Commands:
   zimppy wallet balance [--all]  Show balance (--all for per-account breakdown)
   zimppy wallet seed             Show seed phrase (for backup)
   zimppy wallet send <addr> <zat> Send ZEC (--wait to block until confirmed)
+  zimppy wallet transfer <from> <to> <zat>  Transfer between accounts
   zimppy wallet fund             How to add funds
   zimppy wallet services         List available paid services
   zimppy request <URL>           Make HTTP request with auto-pay
@@ -999,10 +1049,11 @@ Examples:
       case 'seed': return walletSeed()
       case 'fund': return walletFund()
       case 'shield': return walletShield()
+      case 'transfer': return walletTransfer(args.slice(2))
       case 'services': return walletServices(args.slice(2))
       default:
         console.error(`Unknown wallet command: ${sub}`)
-        console.error('Available: create, restore, list, use, whoami, balance, seed, fund, services')
+        console.error('Available: create, restore, list, use, whoami, balance, send, transfer, seed, fund, shield, services')
         process.exit(1)
     }
   }

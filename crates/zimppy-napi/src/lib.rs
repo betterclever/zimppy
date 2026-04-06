@@ -299,6 +299,18 @@ impl ZimppyWalletNapi {
             .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
+    /// Get the default unified address for a specific account.
+    /// Auto-generates a UA if one doesn't exist yet.
+    #[napi]
+    pub async fn address_for_account(&self, account_index: u32) -> napi::Result<String> {
+        self.ensure_open().await?;
+        let mut wallet = self.wallet.lock().await;
+        wallet
+            .address_for_account(account_index)
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
     /// Get the wallet balance.
     #[napi]
     pub async fn balance(&self) -> napi::Result<NapiWalletBalance> {
@@ -339,6 +351,27 @@ impl ZimppyWalletNapi {
             .await
             .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))?;
         trace_napi("send", format!("txid={txid}"));
+        Ok(txid)
+    }
+
+    /// Send ZEC from a specific account. Returns txid.
+    #[napi]
+    pub async fn send_from_account(
+        &self,
+        account_index: u32,
+        to: String,
+        amount_zat: String,
+        memo: Option<String>,
+    ) -> napi::Result<String> {
+        self.ensure_open().await?;
+        let amount: u64 = amount_zat
+            .parse()
+            .map_err(|_| napi::Error::from_reason("invalid amount"))?;
+        let mut wallet = self.wallet.lock().await;
+        let txid = wallet
+            .send_from_account(account_index, &to, amount, memo.as_deref())
+            .await
+            .map_err(|e: WalletError| napi::Error::from_reason(e.to_string()))?;
         Ok(txid)
     }
 
