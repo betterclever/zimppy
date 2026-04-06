@@ -1,3 +1,4 @@
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Once;
 
@@ -53,5 +54,8 @@ pub(crate) fn to_zingo_config(config: &WalletConfig) -> Result<ZingoConfig, Wall
     Ok(ZingoConfig::build(chain)
         .set_lightwalletd_uri(uri)
         .set_wallet_dir(config.data_dir.clone())
+        .set_no_of_accounts(
+            NonZeroU32::new(config.num_accounts.max(1)).expect("nonzero"),
+        )
         .create())
 }

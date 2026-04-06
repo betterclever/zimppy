@@ -28,6 +28,7 @@ export interface ResolvedWallet {
   network: 'testnet' | 'mainnet'
   address: string
   orchardIvk: string
+  tAddress: string
 }
 
 const ZIMPPY_DIR = join(homedir(), '.zimppy')
@@ -71,9 +72,10 @@ export async function resolveWallet(name?: string): Promise<ResolvedWallet> {
     process.env.ZIMPPY_PASSPHRASE ?? null,
   )
 
-  const [address, orchardIvk, walletNetwork] = await Promise.all([
+  const [address, orchardIvk, tAddress, walletNetwork] = await Promise.all([
     wallet.address(),
     wallet.orchardIvk(),
+    wallet.transparentAddress(),
     Promise.resolve(wallet.network() as string),
   ]).finally(async () => {
     console.error('[zimppy-ts:resolveWallet:close]', { walletName, dataDir })
@@ -89,6 +91,7 @@ export async function resolveWallet(name?: string): Promise<ResolvedWallet> {
     network,
     address,
     orchardIvk,
+    tAddress,
   }
 }
 

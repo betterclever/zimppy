@@ -28,7 +28,7 @@ const { zcashClient, zcashSessionClient, isEventStream, parseEvent } = require('
 
 import { ui } from './ui.js'
 
-const VERSION = '0.4.0'
+const VERSION = '0.5.0'
 const CONFIG_DIR = process.env.ZIMPPY_HOME ?? join(homedir(), '.zimppy')
 const WALLETS_DIR = join(CONFIG_DIR, 'wallets')
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
@@ -226,6 +226,7 @@ async function walletWhoami(): Promise<void> {
     await syncWallet(wallet, 'Syncing wallet')
 
     const address = await wallet.address()
+    const tAddress = await wallet.transparentAddress()
     const shortAddr = address.length > 50 ? `${address.slice(0, 25)}...${address.slice(-15)}` : address
 
     // Cache address in config for refund operations
@@ -236,8 +237,10 @@ async function walletWhoami(): Promise<void> {
     const bal = await wallet.balance()
 
     console.log(`--- Zimppy Wallet ---`)
-    console.log(`  Address:  ${shortAddr}`)
-    console.log(`  Balance:  ${bal.totalZat} zat`)
+    console.log(`  Address (UA):        ${shortAddr}`)
+    console.log(`  Address (T-addr):    ${tAddress}`)
+    console.log(`  Shielded balance:    ${bal.totalZat} zat`)
+    console.log(`  Transparent balance: ${bal.transparentZat} zat`)
     console.log(`  Network:  ${cfg.network}`)
     console.log(`  Status:   Ready`)
     console.log(`---`)
@@ -248,7 +251,56 @@ async function walletWhoami(): Promise<void> {
   }
 }
 
-async function walletBalance(): Promise<void> {
+async function walletBalance(args: string[] = []): Promise<void> {
+  const showAll = args.includes('--all')
+  const cfg = requireConfig()
+  let wallet: ZimppyWalletNapi | null = null
+  try {
+    wallet = await openWallet(cfg)
+    await syncWallet(wallet, 'Syncing wallet')
+
+    if (showAll) {
+      const numAccounts = await wallet.numAccounts()
+      let totalShielded = 0n
+      let totalTransparent = 0n
+
+      console.log(`--- Wallet Balance (all accounts) ---`)
+      for (let i = 0; i < numAccounts; i++) {
+        const bal = await wallet.balanceForAccount(i)
+        const shielded = BigInt(bal.totalZat)
+        const transparent = BigInt(bal.transparentZat)
+        totalShielded += shielded
+        totalTransparent += transparent
+        console.log(`  Account ${i}:`)
+        console.log(`    Shielded:    ${bal.totalZat} zat`)
+        console.log(`    Transparent: ${bal.transparentZat} zat`)
+      }
+      console.log(`  ---`)
+      console.log(`  Total shielded:    ${totalShielded.toString()} zat`)
+      console.log(`  Total transparent: ${totalTransparent.toString()} zat`)
+      console.log(`  Total:             ${(totalShielded + totalTransparent).toString()} zat`)
+      console.log(`  Network:           ${cfg.network}`)
+      console.log(`---`)
+    } else {
+      const bal = await wallet.balance()
+
+      console.log(`--- Wallet Balance ---`)
+      console.log(`  Shielded spendable:  ${bal.spendableZat} zat`)
+      console.log(`  Shielded pending:    ${bal.pendingZat} zat`)
+      console.log(`  Shielded total:      ${bal.totalZat} zat`)
+      console.log(`  Transparent:         ${bal.transparentZat} zat`)
+      console.log(`  Transparent pending: ${bal.transparentPendingZat} zat`)
+      console.log(`  Network:             ${cfg.network}`)
+      console.log(`---`)
+    }
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+  } finally {
+    await wallet?.close().catch(() => {})
+  }
+}
+
+async function walletShield(): Promise<void> {
   const cfg = requireConfig()
   let wallet: ZimppyWalletNapi | null = null
   try {
@@ -256,13 +308,69 @@ async function walletBalance(): Promise<void> {
     await syncWallet(wallet, 'Syncing wallet')
 
     const bal = await wallet.balance()
+    if (BigInt(bal.transparentZat) === 0n) {
+      console.log('No transparent funds to shield.')
+      return
+    }
 
-    console.log(`--- Wallet Balance ---`)
-    console.log(`  Spendable: ${bal.spendableZat} zat`)
-    console.log(`  Pending:   ${bal.pendingZat} zat`)
-    console.log(`  Total:     ${bal.totalZat} zat`)
-    console.log(`  Network:   ${cfg.network}`)
-    console.log(`---`)
+    console.log(`Shielding ${bal.transparentZat} zat from transparent pool...`)
+    const sp = ui.spinner('Shielding')
+    try {
+      const txid = await wallet.shield()
+      sp.ok(`Shielded — txid: ${txid}`)
+      console.log(`  txid: ${txid}`)
+    } catch (e) {
+      sp.fail('Shield failed', (e as Error).message)
+    }
+  } catch (e) {
+    console.error(`ERROR: ${(e as Error).message}`)
+  } finally {
+    await wallet?.close().catch(() => {})
+  }
+}
+
+async function walletTransfer(args: string[]): Promise<void> {
+  const fromAccount = Number(args[0])
+  const toAccount = Number(args[1])
+  const amountZat = args[2]
+
+  if (isNaN(fromAccount) || isNaN(toAccount) || !amountZat) {
+    console.error('Usage: zimppy wallet transfer <from_account> <to_account> <amount_zat>')
+    console.error('')
+    console.error('Transfer ZEC between accounts within the same wallet.')
+    console.error('  from_account   Source account index (e.g., 0)')
+    console.error('  to_account     Destination account index (e.g., 1)')
+    console.error('  amount_zat     Amount in zatoshis')
+    process.exit(1)
+  }
+
+  const cfg = requireConfig()
+  let wallet: ZimppyWalletNapi | null = null
+  try {
+    wallet = await openWallet(cfg)
+    await syncWallet(wallet, 'Syncing wallet')
+
+    const numAccounts = await wallet.numAccounts()
+    if (fromAccount >= numAccounts || toAccount >= numAccounts) {
+      console.error(`ERROR: Wallet has ${numAccounts} account(s) (indices 0-${numAccounts - 1})`)
+      process.exit(1)
+    }
+    if (fromAccount === toAccount) {
+      console.error('ERROR: Source and destination accounts must be different')
+      process.exit(1)
+    }
+
+    // Get destination address
+    const toAddr = await wallet.addressForAccount(toAccount)
+    const fromBal = await wallet.balanceForAccount(fromAccount)
+    console.log(`  From account ${fromAccount}: ${fromBal.totalZat} zat`)
+    console.log(`  To account ${toAccount}: ${toAddr.slice(0, 25)}...`)
+    console.log(`  Amount: ${amountZat} zat`)
+
+    const sp = ui.spinner(`Sending ${amountZat} zat from account ${fromAccount} to account ${toAccount}`)
+    const txid = await wallet.sendFromAccount(fromAccount, toAddr, amountZat, null)
+    sp.ok(`Sent — txid: ${txid}`)
+    console.log(`  txid: ${txid}`)
   } catch (e) {
     console.error(`ERROR: ${(e as Error).message}`)
   } finally {
@@ -898,9 +1006,10 @@ Commands:
   zimppy wallet list             List all wallets
   zimppy wallet use <name>       Switch active wallet
   zimppy wallet whoami           Show address + balance + network
-  zimppy wallet balance          Show balance
+  zimppy wallet balance [--all]  Show balance (--all for per-account breakdown)
   zimppy wallet seed             Show seed phrase (for backup)
   zimppy wallet send <addr> <zat> Send ZEC (--wait to block until confirmed)
+  zimppy wallet transfer <from> <to> <zat>  Transfer between accounts
   zimppy wallet fund             How to add funds
   zimppy wallet services         List available paid services
   zimppy request <URL>           Make HTTP request with auto-pay
@@ -935,14 +1044,16 @@ Examples:
       case 'list': return walletList()
       case 'use': return walletUse(args[2])
       case 'whoami': return walletWhoami()
-      case 'balance': return walletBalance()
+      case 'balance': return walletBalance(args.slice(2))
       case 'send': return walletSend(args.slice(2))
       case 'seed': return walletSeed()
       case 'fund': return walletFund()
+      case 'shield': return walletShield()
+      case 'transfer': return walletTransfer(args.slice(2))
       case 'services': return walletServices(args.slice(2))
       default:
         console.error(`Unknown wallet command: ${sub}`)
-        console.error('Available: create, restore, list, use, whoami, balance, seed, fund, services')
+        console.error('Available: create, restore, list, use, whoami, balance, send, transfer, seed, fund, shield, services')
         process.exit(1)
     }
   }

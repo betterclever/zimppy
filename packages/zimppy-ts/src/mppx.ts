@@ -140,3 +140,137 @@ async function verifyViaNapi(parameters: {
 export const zcashServer = zcash
 
 export { zcashMethod as method }
+
+// ── zcashtransparent ────────────────────────────────────────────────
+
+export const zcashTransparentRequestSchema = z.object({
+  amount: z.string(),
+  currency: z.string(),
+  recipient: z.string(), // Zcash T-address (tm... or t1...)
+})
+
+export const zcashTransparentCredentialPayloadSchema = z.object({
+  txid: z.string(),
+  outputIndex: z.number(),
+})
+
+export const zcashTransparentMethod = Method.from({
+  name: 'zcashtransparent',
+  intent: 'charge',
+  schema: {
+    request: zcashTransparentRequestSchema,
+    credential: {
+      payload: zcashTransparentCredentialPayloadSchema,
+    },
+  },
+})
+
+export interface ZcashTransparentVerifyResult {
+  verified: boolean
+  txid: string
+  reference?: string
+}
+
+export interface ZcashTransparentServerOptions {
+  /** T-address that will receive payments */
+  tAddress?: string
+  /** Zebrad RPC endpoint */
+  rpcEndpoint?: string
+  /** Generate a fresh T-address per challenge (for replay prevention) */
+  generateAddress?: () => Promise<string>
+  /** Override: custom verification function (skips NAPI verify) */
+  verifyPayment?: (parameters: {
+    amount: string
+    challenge: z.output<typeof zcashTransparentRequestSchema>
+    challengeId: string
+    txid: string
+    outputIndex: number
+  }) => Promise<ZcashTransparentVerifyResult>
+}
+
+export function zcashTransparent(options: ZcashTransparentServerOptions) {
+  const crypto = options.verifyPayment ? null : new NapiCryptoClient(options.rpcEndpoint)
+
+  return Method.toServer(zcashTransparentMethod, {
+    ...(options.tAddress && !options.generateAddress ? { defaults: { recipient: options.tAddress } } : {}),
+    // When generateAddress is provided, inject a fresh T-address per challenge via the request hook
+    ...(options.generateAddress ? {
+      async request({ credential, request }: { credential?: unknown; request: z.input<typeof zcashTransparentRequestSchema> }) {
+        // Only inject address on challenge creation (no credential yet), not on verification
+        if (!credential && !request.recipient) {
+          const freshAddress = await options.generateAddress!()
+          return { ...request, recipient: freshAddress }
+        }
+        return request
+      },
+    } : {}),
+    async verify({ credential, request }) {
+      const { txid, outputIndex } = credential.payload
+
+      const result = options.verifyPayment
+        ? await options.verifyPayment({
+            amount: request.amount,
+            challenge: request,
+            challengeId: credential.challenge.id,
+            txid,
+            outputIndex,
+          })
+        : await crypto!
+            .verifyTransparent({
+              txid,
+              outputIndex,
+              expectedAddress: request.recipient,
+              expectedAmountZat: request.amount,
+            })
+            .then((r): ZcashTransparentVerifyResult => ({ verified: r.verified, txid: r.txid }))
+
+      if (!result.verified) {
+        throw new Error('payment not verified')
+      }
+
+      return Receipt.from({
+        method: zcashTransparentMethod.name,
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        reference: result.reference ?? result.txid,
+      })
+    },
+  })
+}
+
+export interface ZcashTransparentClientPayment {
+  txid: string
+  outputIndex: number
+}
+
+export interface ZcashTransparentClientOptions {
+  createPayment?: (parameters: {
+    challenge: z.output<typeof zcashTransparentRequestSchema>
+    challengeId: string
+  }) => Promise<ZcashTransparentClientPayment>
+}
+
+export function zcashTransparentClient(options: ZcashTransparentClientOptions = {}) {
+  return Method.toClient(zcashTransparentMethod, {
+    async createCredential({ challenge }) {
+      if (!options.createPayment) {
+        throw new Error(
+          'zcashtransparent client auto-pay is not configured. Pass createPayment(...) to zcashTransparentClient().',
+        )
+      }
+
+      const payment = await options.createPayment({
+        challenge: challenge.request,
+        challengeId: challenge.id,
+      })
+
+      return Credential.serialize({
+        challenge,
+        payload: {
+          txid: payment.txid,
+          outputIndex: payment.outputIndex,
+        },
+      })
+    },
+  })
+}

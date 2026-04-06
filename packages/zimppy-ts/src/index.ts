@@ -13,12 +13,19 @@ export {
   zcash,
   zcashServer,
   zcashClient,
+  zcashTransparentMethod,
+  zcashTransparentRequestSchema,
+  zcashTransparentCredentialPayloadSchema,
+  zcashTransparentClient,
 } from './mppx.js'
 export type {
   ZcashClientOptions,
   ZcashClientPayment,
   ZcashServerOptions,
   ZcashVerifyResult,
+  ZcashTransparentClientOptions,
+  ZcashTransparentClientPayment,
+  ZcashTransparentVerifyResult,
 } from './mppx.js'
 export {
   zcashSessionMethod,

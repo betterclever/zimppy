@@ -14,15 +14,20 @@
  */
 
 import { Store } from 'mppx'
-import { resolveWallet } from './wallet.js'
+import { resolveWallet, openWallet } from './wallet.js'
 import { NapiCryptoClient } from './crypto-client.js'
 import {
   zcash as zcashRaw,
   zcashMethod,
   zcashRequestSchema,
   zcashCredentialPayloadSchema,
+  zcashTransparent as zcashTransparentRaw,
+  zcashTransparentMethod,
+  zcashTransparentRequestSchema,
+  zcashTransparentCredentialPayloadSchema,
+  zcashTransparentClient,
 } from './mppx.js'
-import type { ZcashServerOptions, ZcashVerifyResult } from './mppx.js'
+import type { ZcashServerOptions, ZcashVerifyResult, ZcashTransparentServerOptions, ZcashTransparentVerifyResult } from './mppx.js'
 import {
   zcashSession as zcashSessionRaw,
   zcashSessionMethod,
@@ -130,6 +135,62 @@ zcash.session = async function session(options: ZcashSessionOptions = {}) {
   })
 }
 
+// ── Transparent Charge ───────────────────────────────────────────
+
+export interface ZcashTransparentOptions {
+  /** Wallet name in ~/.zimppy/wallets/. Uses active wallet if omitted. */
+  wallet?: string
+  /** Override: T-address that receives payments (skips wallet resolution) */
+  tAddress?: string
+  /** Override: Zebrad RPC endpoint */
+  rpcEndpoint?: string
+  /** Override: custom verification function */
+  verifyPayment?: ZcashTransparentServerOptions['verifyPayment']
+  /** Generate a fresh T-address per challenge for replay prevention. Defaults to true. */
+  perChallenge?: boolean
+}
+
+/**
+ * Create a Zcash transparent charge method for the server.
+ *
+ * By default, generates a fresh T-address per challenge for replay prevention.
+ * Pass `perChallenge: false` to use a single static T-address instead.
+ *
+ * ```ts
+ * const method = await zcashTransparent({ wallet: 'server-wallet' })
+ * const mppx = Mppx.create({ methods: [method] })
+ * ```
+ */
+export async function zcashTransparent(
+  options: ZcashTransparentOptions = {},
+): Promise<ReturnType<typeof zcashTransparentRaw>> {
+  if (options.tAddress || options.verifyPayment) {
+    return zcashTransparentRaw({
+      tAddress: options.tAddress,
+      rpcEndpoint: options.rpcEndpoint,
+      verifyPayment: options.verifyPayment,
+    })
+  }
+
+  const { wallet, config } = await openWallet(options.wallet)
+
+  if (options.perChallenge === false) {
+    // Static mode: use a single T-address (closes wallet after resolving)
+    const tAddress = await wallet.transparentAddress()
+    await wallet.close().catch(() => {})
+    return zcashTransparentRaw({
+      tAddress,
+      rpcEndpoint: config.rpcEndpoint,
+    })
+  }
+
+  // Per-challenge mode (default): keep wallet open, generate fresh address per challenge
+  return zcashTransparentRaw({
+    rpcEndpoint: config.rpcEndpoint,
+    generateAddress: () => wallet.generateNextTransparentAddress(),
+  })
+}
+
 // ── Re-exports ──────────────────────────────────────────────────
 
 export {
@@ -141,8 +202,13 @@ export {
   zcashSessionMethod,
   sessionRequestSchema,
   sessionCredentialPayloadSchema,
+  zcashTransparentRaw,
+  zcashTransparentMethod,
+  zcashTransparentRequestSchema,
+  zcashTransparentCredentialPayloadSchema,
+  zcashTransparentClient,
 }
-export type { ZcashServerOptions, ZcashVerifyResult, ZcashSessionServerOptions }
+export type { ZcashServerOptions, ZcashVerifyResult, ZcashSessionServerOptions, ZcashTransparentServerOptions, ZcashTransparentVerifyResult }
 
 export { NapiCryptoClient, HttpCryptoClient, createCryptoBackend } from './crypto-client.js'
 export type { CryptoBackend, ShieldedVerifyResult, VerifyShieldedRequest, VerifyTransparentRequest, VerifyResult } from './crypto-client.js'

@@ -26,12 +26,16 @@ pub use error::WalletError;
 /// Wallet balance information.
 #[derive(Debug, Clone)]
 pub struct WalletBalance {
-    /// Total spendable balance in zatoshis
+    /// Spendable shielded (Orchard) balance in zatoshis
     pub spendable_zat: u64,
-    /// Balance pending confirmations
+    /// Shielded balance pending confirmations
     pub pending_zat: u64,
-    /// Total balance (spendable + pending)
+    /// Total shielded balance (spendable + pending)
     pub total_zat: u64,
+    /// Confirmed transparent balance in zatoshis
+    pub transparent_zat: u64,
+    /// Unconfirmed transparent balance in zatoshis
+    pub transparent_pending_zat: u64,
 }
 
 /// Sync status after a sync operation.
@@ -233,6 +237,35 @@ impl ZimppyWallet {
             .ok_or_else(|| WalletError::Address("no addresses found".to_string()))
     }
 
+    /// Get the default unified address for a specific account.
+    /// Auto-generates a UA if one doesn't exist yet for that account.
+    pub async fn address_for_account(&mut self, account_index: u32) -> Result<String, WalletError> {
+        use zingolib::wallet::keys::unified::ReceiverSelection;
+
+        let account_id = zip32::AccountId::try_from(account_index)
+            .map_err(|_| WalletError::Client(format!("invalid account index: {account_index}")))?;
+
+        // Check if a UA already exists for this account
+        let addrs = self.client.unified_addresses_json().await;
+        if let Some(encoded) = addrs
+            .members()
+            .find(|a| a["account"].as_u32() == Some(account_index))
+            .and_then(|a| a["encoded_address"].as_str())
+        {
+            return Ok(encoded.to_string());
+        }
+
+        // Generate a default UA for this account
+        let (_id, ua) = self
+            .client
+            .generate_unified_address(ReceiverSelection::all_shielded(), account_id)
+            .await
+            .map_err(|e| WalletError::Address(format!("failed to generate address for account {account_index}: {e:?}")))?;
+
+        self.save().await?;
+        Ok(ua.encode(&self.client.config().chain))
+    }
+
     /// Generate a unified address with both Sapling and Orchard receivers.
     /// Returns an existing full shielded UA if one was already created.
     pub async fn full_address(&mut self) -> Result<String, WalletError> {
@@ -263,6 +296,64 @@ impl ZimppyWallet {
         Ok(ua.encode(&self.client.config().chain))
     }
 
+    /// Get (or generate) the wallet's first transparent T-address.
+    ///
+    /// Calls `generate_transparent_address` on first use to ensure an address
+    /// is derived, then reads it back from `transparent_addresses_json`.
+    /// Subsequent calls return the same address (idempotent).
+    pub async fn transparent_address(&mut self) -> Result<String, WalletError> {
+        // Check if a transparent address already exists for this account
+        let existing = self.client.transparent_addresses_json().await;
+        let has_addr = existing
+            .members()
+            .filter(|a| a["account"].as_u32() == Some(self.account_index))
+            .any(|a| a["encoded_address"].as_str().is_some());
+
+        if !has_addr {
+            self.client
+                .generate_transparent_address(self.account_id(), false)
+                .await
+                .map_err(|e| WalletError::Address(format!("failed to generate transparent address: {e}")))?;
+            self.save().await?;
+        }
+
+        let addrs = self.client.transparent_addresses_json().await;
+        addrs
+            .members()
+            .filter(|a| a["account"].as_u32() == Some(self.account_index))
+            .next()
+            .and_then(|a| a["encoded_address"].as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| WalletError::Address("no transparent address found after generation".to_string()))
+    }
+
+    /// Shield all transparent funds into the Orchard pool.
+    ///
+    /// Uses zingolib's `quick_shield` which proposes and broadcasts in one step.
+    /// Returns the txid of the shielding transaction.
+    /// Errors if there are no transparent funds to shield.
+    pub async fn shield(&mut self) -> Result<String, WalletError> {
+        trace_wallet(
+            "shield:begin",
+            format!("wallet_path={}", self.client.config().get_wallet_path().display()),
+        );
+        let txids = self
+            .client
+            .quick_shield(self.account_id())
+            .await
+            .map_err(|e| WalletError::Shield(format!("{e}")))?;
+
+        // For encrypted wallets, force a save after the shielding tx is created
+        if self.passphrase.is_some() {
+            self.client.wallet.write().await.save_required = true;
+            self.save().await?;
+        }
+
+        let txid = txids.head.to_string();
+        trace_wallet("shield:end", format!("txid={txid}"));
+        Ok(txid)
+    }
+
     /// Get the wallet's current balance.
     pub async fn balance(&self) -> Result<WalletBalance, WalletError> {
         let bal = self
@@ -273,11 +364,15 @@ impl ZimppyWallet {
 
         let spendable = bal.confirmed_orchard_balance.map(u64::from).unwrap_or(0);
         let pending = bal.unconfirmed_orchard_balance.map(u64::from).unwrap_or(0);
+        let transparent = bal.confirmed_transparent_balance.map(u64::from).unwrap_or(0);
+        let transparent_pending = bal.unconfirmed_transparent_balance.map(u64::from).unwrap_or(0);
 
         Ok(WalletBalance {
             spendable_zat: spendable,
             pending_zat: pending,
             total_zat: spendable + pending,
+            transparent_zat: transparent,
+            transparent_pending_zat: transparent_pending,
         })
     }
 
@@ -450,6 +545,144 @@ impl ZimppyWallet {
         self.account_index
     }
 
+    /// Generate the next transparent address (new BIP44 index each call).
+    /// Used for per-challenge address binding in transparent payments.
+    /// This is pure local HD derivation — no sync needed.
+    pub async fn generate_next_transparent_address(&mut self) -> Result<String, WalletError> {
+        let (addr_id, _addr) = self
+            .client
+            .generate_transparent_address(self.account_id(), false)
+            .await
+            .map_err(|e| {
+                WalletError::Address(format!("failed to generate transparent address: {e}"))
+            })?;
+
+        self.save().await?;
+
+        // Read back the generated address using its exact address_index
+        let target_index = addr_id.address_index().index();
+        let addrs = self.client.transparent_addresses_json().await;
+        addrs
+            .members()
+            .find(|a| {
+                a["account"].as_u32() == Some(self.account_index)
+                    && a["address_index"].as_u32() == Some(target_index)
+            })
+            .and_then(|a| a["encoded_address"].as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                WalletError::Address("generated address not found in wallet".to_string())
+            })
+    }
+
+    /// List all transparent addresses generated for this account.
+    pub async fn transparent_addresses(&self) -> Result<Vec<String>, WalletError> {
+        let addrs = self.client.transparent_addresses_json().await;
+        Ok(addrs
+            .members()
+            .filter(|a| a["account"].as_u32() == Some(self.account_index))
+            .filter_map(|a| a["encoded_address"].as_str().map(String::from))
+            .collect())
+    }
+
+    /// Get balance for a specific account by index.
+    pub async fn balance_for_account(&self, account_index: u32) -> Result<WalletBalance, WalletError> {
+        let account_id = zip32::AccountId::try_from(account_index)
+            .map_err(|_| WalletError::Client(format!("invalid account index: {account_index}")))?;
+
+        let bal = self
+            .client
+            .account_balance(account_id)
+            .await
+            .map_err(|e| WalletError::Client(format!("{e}")))?;
+
+        let spendable = bal.confirmed_orchard_balance.map(u64::from).unwrap_or(0);
+        let pending = bal.unconfirmed_orchard_balance.map(u64::from).unwrap_or(0);
+        let transparent = bal.confirmed_transparent_balance.map(u64::from).unwrap_or(0);
+        let transparent_pending = bal.unconfirmed_transparent_balance.map(u64::from).unwrap_or(0);
+
+        Ok(WalletBalance {
+            spendable_zat: spendable,
+            pending_zat: pending,
+            total_zat: spendable + pending,
+            transparent_zat: transparent,
+            transparent_pending_zat: transparent_pending,
+        })
+    }
+
+    /// Get number of accounts in this wallet.
+    pub async fn num_accounts(&self) -> u32 {
+        let wallet = self.client.wallet.read().await;
+        wallet.unified_key_store.len() as u32
+    }
+
+    /// Add a new account to this wallet (derives next ZIP32 account from seed).
+    /// Returns the new account's index.
+    pub async fn create_account(&mut self) -> Result<u32, WalletError> {
+        {
+            let mut wallet = self.client.wallet.write().await;
+            wallet
+                .create_new_account()
+                .map_err(|e| WalletError::Client(format!("failed to create account: {e}")))?;
+            // The new account ID is the max key in the key store
+            let new_id = wallet
+                .unified_key_store
+                .keys()
+                .copied()
+                .max()
+                .unwrap_or(zip32::AccountId::ZERO);
+            let new_index = u32::from(new_id);
+            // Drop the write lock before saving
+            drop(wallet);
+            self.save().await?;
+            Ok(new_index)
+        }
+    }
+
+    /// Send ZEC from a specific account.
+    pub async fn send_from_account(
+        &mut self,
+        account_index: u32,
+        to: &str,
+        amount_zat: u64,
+        memo: Option<&str>,
+    ) -> Result<String, WalletError> {
+        let account_id = zip32::AccountId::try_from(account_index)
+            .map_err(|_| WalletError::Client(format!("invalid account index: {account_index}")))?;
+
+        let recipient: ZcashAddress = to
+            .parse()
+            .map_err(|e| WalletError::Send(format!("invalid address: {e}")))?;
+
+        let amount = Zatoshis::from_u64(amount_zat)
+            .map_err(|_| WalletError::Send("invalid amount".to_string()))?;
+
+        let memo_bytes = match memo {
+            Some(m) => Some(
+                MemoBytes::from_bytes(m.as_bytes())
+                    .map_err(|e| WalletError::Send(format!("memo error: {e}")))?,
+            ),
+            None => None,
+        };
+
+        let receivers = vec![Receiver {
+            recipient_address: recipient,
+            amount,
+            memo: memo_bytes,
+        }];
+
+        let request = transaction_request_from_receivers(receivers)
+            .map_err(|e| WalletError::Send(format!("request error: {e}")))?;
+
+        let txids = self
+            .client
+            .quick_send(request, account_id, true)
+            .await
+            .map_err(|e| WalletError::Send(format!("{e}")))?;
+
+        Ok(txids.head.to_string())
+    }
+
     /// List (account_index, unified_address) for all accounts in this wallet.
     pub async fn accounts_list(&self) -> Result<Vec<(u32, String)>, WalletError> {
         let addrs = self.client.unified_addresses_json().await;
@@ -620,7 +853,7 @@ fn write_wallet_bytes(wallet_path: &Path, bytes: &[u8]) -> Result<(), WalletErro
 
 #[cfg(test)]
 mod tests {
-    use super::{wallet_path, WalletConfig, WalletError, ZimppyWallet};
+    use super::{wallet_path, WalletBalance, WalletConfig, WalletError, ZimppyWallet};
     use bip0039::{English, Mnemonic};
     use std::fs;
     use std::path::PathBuf;
@@ -770,6 +1003,130 @@ mod tests {
         let first = wallet.full_address().await.expect("first full address");
         let second = wallet.full_address().await.expect("second full address");
         assert_eq!(first, second);
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn transparent_address_is_deterministic() {
+        let data_dir = test_wallet_dir("t-addr");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let mut wallet = ZimppyWallet::create(test_config(
+            data_dir.clone(),
+            Some(seed),
+            Some(3_000_000),
+        ))
+        .await
+        .expect("wallet should be created");
+
+        let addr1 = wallet.transparent_address().await.expect("first call");
+        let addr2 = wallet.transparent_address().await.expect("second call");
+        // T-addresses on testnet start with "tm"
+        assert!(addr1.starts_with("tm") || addr1.starts_with("t1"),
+            "expected T-address, got: {addr1}");
+        assert_eq!(addr1, addr2, "should be idempotent");
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn shield_returns_error_when_no_transparent_funds() {
+        let data_dir = test_wallet_dir("shield-empty");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let mut wallet = ZimppyWallet::create(test_config(
+            data_dir.clone(),
+            Some(seed),
+            Some(3_000_000),
+        ))
+        .await
+        .expect("wallet should be created");
+
+        // Shield with no funds should return a Shield error (nothing to shield)
+        let result = wallet.shield().await;
+        assert!(matches!(result, Err(WalletError::Shield(_))),
+            "expected Shield error, got: {result:?}");
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn wallet_balance_has_transparent_fields() {
+        let bal = WalletBalance {
+            spendable_zat: 100,
+            pending_zat: 0,
+            total_zat: 100,
+            transparent_zat: 50,
+            transparent_pending_zat: 0,
+        };
+        assert_eq!(bal.transparent_zat, 50);
+        assert_eq!(bal.transparent_pending_zat, 0);
+    }
+
+    #[tokio::test]
+    async fn generate_next_transparent_address_returns_different_each_call() {
+        let data_dir = test_wallet_dir("gen-t-addr");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let mut wallet = ZimppyWallet::create(test_config(
+            data_dir.clone(),
+            Some(seed),
+            Some(3_000_000),
+        ))
+        .await
+        .expect("wallet should be created");
+
+        let addr1 = wallet.generate_next_transparent_address().await.expect("first");
+        let addr2 = wallet.generate_next_transparent_address().await.expect("second");
+
+        assert!(addr1.starts_with("tm") || addr1.starts_with("t1"),
+            "expected T-address, got: {addr1}");
+        assert_ne!(addr1, addr2, "should return different addresses each call");
+
+        // transparentAddresses should contain both
+        let all = wallet.transparent_addresses().await.expect("list");
+        assert!(all.contains(&addr1), "addr1 missing from list");
+        assert!(all.contains(&addr2), "addr2 missing from list");
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn multi_account_create_and_balance() {
+        let data_dir = test_wallet_dir("multi-acct");
+        let seed = Mnemonic::<English>::generate(bip0039::Count::Words24).to_string();
+
+        let mut wallet = ZimppyWallet::create(WalletConfig {
+            data_dir: data_dir.clone(),
+            lwd_endpoint: "https://testnet.zec.rocks".to_string(),
+            network: NetworkType::Test,
+            seed_phrase: Some(seed),
+            birthday_height: Some(3_000_000),
+            account_index: 0,
+            num_accounts: 2,
+            passphrase: None,
+        })
+        .await
+        .expect("wallet should be created");
+
+        // Should start with 2 accounts
+        assert_eq!(wallet.num_accounts().await, 2);
+
+        // Balance for both accounts should work (both zero)
+        let bal0 = wallet.balance_for_account(0).await.expect("account 0");
+        assert_eq!(bal0.total_zat, 0);
+        let bal1 = wallet.balance_for_account(1).await.expect("account 1");
+        assert_eq!(bal1.total_zat, 0);
+
+        // Create a third account
+        let new_idx = wallet.create_account().await.expect("create account");
+        assert_eq!(new_idx, 2);
+        assert_eq!(wallet.num_accounts().await, 3);
+
+        // Balance for new account should work
+        let bal2 = wallet.balance_for_account(2).await.expect("account 2");
+        assert_eq!(bal2.total_zat, 0);
 
         let _ = fs::remove_dir_all(data_dir);
     }

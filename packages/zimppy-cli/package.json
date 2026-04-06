@@ -1,6 +1,6 @@
 {
   "name": "zimppy",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "description": "Private machine payments on Zcash \u2014 CLI with automatic shielded payment handling",
   "type": "module",
@@ -11,9 +11,9 @@
     "start": "tsx src/cli.ts"
   },
   "dependencies": {
-    "@zimppy/core-napi": "0.2.0",
+    "@zimppy/core-napi": "0.5.0",
     "mppx": "^0.4.8",
-    "zimppy-ts": "0.2.0",
+    "zimppy-ts": "0.5.0",
     "tsx": "^4.21.0"
   },
   "repository": {
